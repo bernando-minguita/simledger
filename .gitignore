@@ -1,0 +1,14 @@
+# Per-host configuration - holds real database credentials / API keys.
+# Create yours from the committed sample: copy config/config.sample.php
+# to config/config.php (the installer rewrites the DB constants in it).
+/config/config.php
+
+# Internal tooling (CLI checks/seeding) and runtime data - never publish.
+/dev/
+/storage/
+*.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
