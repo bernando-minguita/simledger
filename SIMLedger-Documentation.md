@@ -637,7 +637,7 @@ The system today interacts with its environment through these logical boundaries
 
 ## External API (driver data sync, current)
 
-SIMLedger exposes a **read-only JSON API** so other in-house systems (the Leave Management System first, payroll/HR later) can pull driver mobile numbers. It ships with the base product; a consumer needs nothing beyond an HTTP GET with a Bearer token.
+SIMLedger exposes a **read-only JSON API** so other in-house systems (the Leave Management System first, payroll/HR later) can pull driver numbers — the **currently assigned company SIM** and/or the driver's **primary personal contact**. It ships with the base product; a consumer needs nothing beyond an HTTP GET with a Bearer token.
 
 ### Endpoint
 
@@ -650,10 +650,13 @@ Auth header (either form is accepted): `Authorization: Bearer <token>` or `X-API
 
 ```json
 { "ok": true, "driver": { "badge_number": "4321", "name": "...", "status": "active",
-  "terminal": "Dammam", "mobile": "05...", "updated_at": "2026-10-08 12:00:00" } }
+  "terminal": "Dammam", "company_sim": "05...", "mobile": "05...",
+  "updated_at": "2026-10-08 12:00:00" } }
 ```
 
-`mobile` is the driver's primary **active personal contact number** (primary first, else lowest id; `null` when none is on file). Error shapes: `401 {"error":"unauthorized"}` (missing / unknown / revoked token, or a non-Bearer scheme), `400 bad_request` (badge longer than 30 chars), `404 driver_not_found`, `405 method_not_allowed` (GET only).
+The roster call answers with the same driver shape in an array: `{ "ok": true, "count": N, "drivers": [ … ] }`.
+
+`company_sim` is the number of the **company SIM currently assigned** to the driver (open assignment; `null` when no SIM is held). `mobile` is the driver's primary **active personal contact number** (primary first, else lowest id; `null` when none is on file). Consumers choose the priority — the LMS sync prefers `company_sim` and falls back to `mobile`. Error shapes: `401 {"error":"unauthorized"}` (missing / unknown / revoked token, or a non-Bearer scheme), `400 bad_request` (badge longer than 30 chars), `404 driver_not_found`, `405 method_not_allowed` (GET only).
 
 ### Tokens (Administration → API Tokens)
 
