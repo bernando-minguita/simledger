@@ -13,17 +13,18 @@ $pdo   = $GLOBALS['pdo'];
 $scope = currentTerminalId();
 
 $q          = trim((string)($_GET['q'] ?? ''));
-$fTerminal  = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$fAgency    = reqInt('agency_id', 0, 0, 100000);
-$fStatus    = (string)($_GET['status'] ?? '');
-$hasSim     = (string)($_GET['has_sim'] ?? '');
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fAgencies  = array_map('intval', filterValues('agency_id'));
+$fStatuses  = array_values(array_intersect(
+    filterValues('status'), array_keys(driverStatusOptions())
+));
+$fHasSims   = array_values(array_intersect(
+    filterValues('has_sim'), ['0', '1']
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 $statuses = driverStatusOptions();
-if (!isset($statuses[$fStatus])) {
-    $fStatus = '';
-}
 
 $sortMap = [
     'badge'       => 'd.badge_number',
@@ -44,17 +45,17 @@ $perPage = 25;
 
 $where  = ' WHERE 1=1';
 $params = [];
-if ($fTerminal > 0) {
-    $where .= ' AND d.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND d.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($fAgency > 0) {
-    $where .= ' AND d.agency_id = ?';
-    $params[] = $fAgency;
+if ($fAgencies !== []) {
+    $where .= ' AND d.agency_id IN (' . implode(',', array_fill(0, count($fAgencies), '?')) . ')';
+    array_push($params, ...$fAgencies);
 }
-if ($fStatus !== '') {
-    $where .= ' AND d.status = ?';
-    $params[] = $fStatus;
+if ($fStatuses !== []) {
+    $where .= ' AND d.status IN (' . implode(',', array_fill(0, count($fStatuses), '?')) . ')';
+    array_push($params, ...$fStatuses);
 }
 if ($q !== '') {
     $where .= ' AND (d.badge_number LIKE ? OR d.name LIKE ? OR s.mobile_number LIKE ?'
@@ -63,10 +64,12 @@ if ($q !== '') {
     $qNorm = normalizePhone($q);
     array_push($params, $like, $like, $like, '%' . ($qNorm ?? $q) . '%', $like);
 }
-if ($hasSim === '1') {
+// has_sim is binary: checking both boxes means "either", so only a single
+// selection filters.
+if ($fHasSims === ['1']) {
     $where .= ' AND EXISTS(SELECT 1 FROM driver_sim_assignments a
                              WHERE a.driver_id = d.id AND a.returned_at IS NULL)';
-} elseif ($hasSim === '0') {
+} elseif ($fHasSims === ['0']) {
     $where .= ' AND NOT EXISTS(SELECT 1 FROM driver_sim_assignments a
                                 WHERE a.driver_id = d.id AND a.returned_at IS NULL)';
 }
@@ -148,56 +151,35 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-4">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Search</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
-                   placeholder="Badge / name / SIM / Iqama" autofocus>
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
+                       placeholder="Badge / name / SIM / Iqama" autofocus>
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="drivers.php">Reset</a>
+            </div>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Agency</label>
-            <select class="form-select" name="agency_id">
-                <option value="">All</option>
-                <?php foreach (agencyOptions(false) as $aid => $aname): ?>
-                    <option value="<?= $aid ?>"<?= $fAgency === $aid ? ' selected' : '' ?>><?= e($aname) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('agency_id', agencyOptions(false), array_map('strval', $fAgencies)) ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Status</label>
-            <select class="form-select" name="status">
-                <option value="">All</option>
-                <?php foreach ($statuses as $skey => $slabel): ?>
-                    <option value="<?= e($skey) ?>"<?= $fStatus === $skey ? ' selected' : '' ?>><?= e($slabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('status', $statuses, array_map('strval', $fStatuses)) ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Has company SIM</label>
-            <select class="form-select" name="has_sim">
-                <option value="">Either</option>
-                <option value="1"<?= $hasSim === '1' ? ' selected' : '' ?>>Yes</option>
-                <option value="0"<?= $hasSim === '0' ? ' selected' : '' ?>>No</option>
-            </select>
-        </div>
-    </div>
-    <div class="row mt-2">
-        <div class="col">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Search</button>
-            <a class="btn btn-link btn-sm" href="drivers.php">Reset</a>
+            <?= checkboxFilterGroup('has_sim', ['1' => 'Yes', '0' => 'No'], array_map('strval', $fHasSims)) ?>
         </div>
     </div>
 </form>

@@ -15,32 +15,31 @@ $pdo = $GLOBALS['pdo'];
 // --- filters ---------------------------------------------------------------
 $termOpts   = terminalOptions(false);
 $scope      = currentTerminalId();
-$fTerminal  = reqInt('terminal_id', $scope ?? 0, 0, 100000);
-$fCarrier   = reqInt('carrier_id', 0, 0, 100000);
-$fStatus    = (string)($_GET['status'] ?? '');
-if (!in_array($fStatus, array_keys(simStatusOptions()), true)) {
-    $fStatus = '';
-}
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fCarriers  = array_map('intval', filterValues('carrier_id'));
+$fStatuses  = array_values(array_intersect(
+    filterValues('status'), array_keys(simStatusOptions())
+));
 
 // Dispatchers are locked to their terminal regardless of the query string.
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];
 }
 
 $where  = ' WHERE 1=1';
 $params = [];
 
-if ($fTerminal > 0) {
-    $where .= ' AND s.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND s.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($fCarrier > 0) {
-    $where .= ' AND s.carrier_id = ?';
-    $params[] = $fCarrier;
+if ($fCarriers !== []) {
+    $where .= ' AND s.carrier_id IN (' . implode(',', array_fill(0, count($fCarriers), '?')) . ')';
+    array_push($params, ...$fCarriers);
 }
-if ($fStatus !== '') {
-    $where .= ' AND s.status = ?';
-    $params[] = $fStatus;
+if ($fStatuses !== []) {
+    $where .= ' AND s.status IN (' . implode(',', array_fill(0, count($fStatuses), '?')) . ')';
+    array_push($params, ...$fStatuses);
 }
 
 // --- KPIs ------------------------------------------------------------------
@@ -57,12 +56,12 @@ $stmt->execute($params);
 $kpi = $stmt->fetch() ?: ['total' => 0, 'assigned' => 0, 'available' => 0,
                           'suspended' => 0, 'lost_damaged' => 0];
 
-// Drivers with / without company SIM.
-$dWhere  = ' WHERE 1=1';
+// Drivers with / without company SIM (terminal-scoped like the SIM KPIs).
 $dParams = [];
-if ($fTerminal > 0) {
-    $dWhere .= ' AND d.terminal_id = ?';
-    $dParams[] = $fTerminal;
+$dCond   = '';
+if ($fTerminals !== []) {
+    $dCond   = ' AND d.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    $dParams = $fTerminals;
 }
 
 $driversStmt = $pdo->prepare(
@@ -72,7 +71,7 @@ $driversStmt = $pdo->prepare(
             SUM(NOT EXISTS(SELECT 1 FROM driver_sim_assignments a
                         WHERE a.driver_id = d.id AND a.returned_at IS NULL)) AS without_sim
        FROM drivers d
-       WHERE d.is_active = 1 AND d.status = 'active'" . ($fTerminal > 0 ? ' AND d.terminal_id = ?' : '')
+       WHERE d.is_active = 1 AND d.status = 'active'" . $dCond
 );
 $driversStmt->execute($dParams);
 $dkpi = $driversStmt->fetch() ?: ['total' => 0, 'with_sim' => 0, 'without_sim' => 0];
@@ -80,13 +79,13 @@ $dkpi = $driversStmt->fetch() ?: ['total' => 0, 'with_sim' => 0, 'without_sim' =
 // --- recent activity (spec section 8) --------------------------------------
 $rWhere  = ' WHERE 1=1';
 $rParams = [];
-if ($fTerminal > 0) {
-    $rWhere .= ' AND a.terminal_id = ?';
-    $rParams[] = $fTerminal;
+if ($fTerminals !== []) {
+    $rWhere .= ' AND a.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($rParams, ...$fTerminals);
 }
-if ($fCarrier > 0) {
-    $rWhere .= ' AND s.carrier_id = ?';
-    $rParams[] = $fCarrier;
+if ($fCarriers !== []) {
+    $rWhere .= ' AND s.carrier_id IN (' . implode(',', array_fill(0, count($fCarriers), '?')) . ')';
+    array_push($rParams, ...$fCarriers);
 }
 
 $recentStmt = $pdo->prepare(
@@ -116,21 +115,23 @@ $recent = $recentStmt->fetchAll();
 // --- alerts (spec section 34) ----------------------------------------------
 $alerts = [];
 
+// Alert deep links carry the terminal scope (single or multi).
+$tq = $fTerminals !== [] ? http_build_query(['terminal_id' => $fTerminals]) : '';
 if ((int)$dkpi['without_sim'] > 0) {
     $alerts[] = ['warning', (int)$dkpi['without_sim'] . ' active drivers have no company SIM',
-        'reports/drivers-without-sim.php' . ($fTerminal > 0 ? '?terminal_id=' . $fTerminal : '')];
+        'reports/drivers-without-sim.php' . ($tq !== '' ? '?' . $tq : '')];
 }
 if ((int)$kpi['available'] > 0) {
     $alerts[] = ['warning', (int)$kpi['available'] . ' company SIMs are currently unassigned',
-        'available.php' . ($fTerminal > 0 ? '?terminal_id=' . $fTerminal : '')];
+        'available.php' . ($tq !== '' ? '?' . $tq : '')];
 }
 if ((int)$kpi['suspended'] > 0) {
     $alerts[] = ['warning', (int)$kpi['suspended'] . ' SIMs are suspended',
-        'sims.php?status=suspended' . ($fTerminal > 0 ? '&terminal_id=' . $fTerminal : '')];
+        'sims.php?status=suspended' . ($tq !== '' ? '&' . $tq : '')];
 }
 if ((int)$kpi['lost_damaged'] > 0) {
     $alerts[] = ['warning', (int)$kpi['lost_damaged'] . ' SIMs are lost or damaged',
-        'sims.php?status=lost' . ($fTerminal > 0 ? '&terminal_id=' . $fTerminal : '')];
+        'sims.php?status%5B%5D=lost&status%5B%5D=damaged' . ($tq !== '' ? '&' . $tq : '')];
 }
 
 $pageTitle = 'Dashboard';
@@ -138,9 +139,9 @@ $activeNav = 'dashboard';
 require __DIR__ . '/includes/header.php';
 
 $filterQuery = http_build_query(array_filter([
-    'terminal_id' => $fTerminal > 0 ? $fTerminal : null,
-    'carrier_id'  => $fCarrier > 0 ? $fCarrier : null,
-    'status'      => $fStatus !== '' ? $fStatus : null,
+    'terminal_id' => $fTerminals !== [] ? $fTerminals : null,
+    'carrier_id'  => $fCarriers !== [] ? $fCarriers : null,
+    'status'      => $fStatuses !== [] ? $fStatuses : null,
 ]));
 $fq = $filterQuery !== '' ? '&' . $filterQuery : '';
 ?>
@@ -165,41 +166,28 @@ $fq = $filterQuery !== '' ? '&' . $filterQuery : '';
 
 <!-- filter bar -->
 <div class="filter-bar mb-3">
-    <form method="get" class="row g-2 align-items-end">
-        <div class="col-md-3">
+    <form method="get" class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e($termOpts[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id" onchange="this.form.submit()">
-                    <option value="">All terminals</option>
-                    <?php foreach ($termOpts as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', $termOpts, array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">Carrier</label>
-            <select class="form-select" name="carrier_id" onchange="this.form.submit()">
-                <option value="">All carriers</option>
-                <?php foreach (carrierOptions() as $cid => $cname): ?>
-                    <option value="<?= $cid ?>"<?= $fCarrier === $cid ? ' selected' : '' ?>><?= e($cname) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('carrier_id', carrierOptions(), array_map('strval', $fCarriers)) ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">SIM status</label>
-            <select class="form-select" name="status" onchange="this.form.submit()">
-                <option value="">All statuses</option>
-                <?php foreach (simStatusOptions() as $skey => $slabel): ?>
-                    <option value="<?= e($skey) ?>"<?= $fStatus === $skey ? ' selected' : '' ?>><?= e($slabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('status', simStatusOptions(), array_map('strval', $fStatuses)) ?>
         </div>
-        <div class="col-md-3">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Apply filters</button>
-            <a class="btn btn-link btn-sm" href="index.php">Reset</a>
+        <div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" type="submit">Apply filters</button>
+                <a class="btn btn-link btn-sm" href="index.php">Reset</a>
+            </div>
         </div>
     </form>
 </div>
@@ -233,7 +221,7 @@ $fq = $filterQuery !== '' ? '&' . $filterQuery : '';
     <div class="col-6 col-md-4 col-xl">
         <div class="kpi kpi-accent-lost">
             <span class="kpi-label">Lost / Damaged</span>
-            <span class="kpi-value"><a href="sims.php?status=lost<?= e($fq) ?>"><?= (int)$kpi['lost_damaged'] ?></a></span>
+            <span class="kpi-value"><a href="sims.php?status%5B%5D=lost&status%5B%5D=damaged<?= e($fq) ?>"><?= (int)$kpi['lost_damaged'] ?></a></span>
         </div>
     </div>
     <div class="col-6 col-md-4 col-xl">

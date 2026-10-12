@@ -15,18 +15,22 @@ $pdo   = $GLOBALS['pdo'];
 $scope = currentTerminalId();
 
 $q         = trim((string)($_GET['q'] ?? ''));
-$fTerminal = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$fType     = (string)($_GET['type'] ?? '');
-$coverage  = (string)($_GET['coverage'] ?? '');   // with | none
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fTypes     = array_values(array_intersect(
+    filterValues('type'), ['personal', 'emergency', 'other']
+));
+$coverages  = array_values(array_intersect(
+    filterValues('coverage'), ['with', 'none']
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 
 $where  = ' WHERE d.is_active = 1';
 $params = [];
-if ($fTerminal > 0) {
-    $where .= ' AND d.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND d.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
 if ($q !== '') {
     $where .= ' AND (d.badge_number LIKE ? OR d.name LIKE ? OR c.phone_number LIKE ?'
@@ -35,19 +39,21 @@ if ($q !== '') {
     $qNorm = normalizePhone($q);
     array_push($params, $like, $like, $like, '%' . ($qNorm ?? $q) . '%');
 }
-if (in_array($fType, ['personal', 'emergency', 'other'], true)) {
-    $where .= ' AND c.contact_type = ?';
-    $params[] = $fType;
+if ($fTypes !== []) {
+    $where .= ' AND c.contact_type IN (' . implode(',', array_fill(0, count($fTypes), '?')) . ')';
+    array_push($params, ...$fTypes);
 }
-if ($coverage === 'none') {
+// Coverage is per-driver binary: "with" + "none" together mean everything,
+// so only a single selection filters.
+if ($coverages === ['none']) {
     $where .= ' AND NOT EXISTS(SELECT 1 FROM driver_contact_numbers c2
                                 WHERE c2.driver_id = d.id AND c2.is_active = 1)';
-} elseif ($coverage === 'with') {
+} elseif ($coverages === ['with']) {
     $where .= ' AND EXISTS(SELECT 1 FROM driver_contact_numbers c2
                             WHERE c2.driver_id = d.id AND c2.is_active = 1)';
 }
 
-$join = $coverage === 'none' ? ' LEFT JOIN driver_contact_numbers c ON 1 = 0'
+$join = $coverages === ['none'] ? ' LEFT JOIN driver_contact_numbers c ON 1 = 0'
     : ' LEFT JOIN driver_contact_numbers c ON c.driver_id = d.id AND c.is_active = 1';
 
 $baseSql = 'SELECT d.id AS driver_id, d.badge_number, d.name, d.status, d.terminal_id,
@@ -129,45 +135,31 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Search</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
-                   placeholder="Badge / name / phone">
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
+                       placeholder="Badge / name / phone">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="contacts.php">Reset</a>
+            </div>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Contact type</label>
-            <select class="form-select" name="type">
-                <option value="">All</option>
-                <?php foreach ($types as $tkey => $tlabel): ?>
-                    <option value="<?= e($tkey) ?>"<?= $fType === $tkey ? ' selected' : '' ?>><?= e($tlabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('type', $types, array_map('strval', $fTypes)) ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Coverage</label>
-            <select class="form-select" name="coverage">
-                <option value="">Either</option>
-                <option value="with"<?= $coverage === 'with' ? ' selected' : '' ?>>Has number</option>
-                <option value="none"<?= $coverage === 'none' ? ' selected' : '' ?>>No number</option>
-            </select>
-        </div>
-        <div class="col-md-3">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Filter</button>
-            <a class="btn btn-link btn-sm" href="contacts.php">Reset</a>
+            <?= checkboxFilterGroup('coverage', ['with' => 'Has number', 'none' => 'No number'], array_map('strval', $coverages)) ?>
         </div>
     </div>
 </form>

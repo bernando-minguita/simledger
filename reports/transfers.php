@@ -19,10 +19,10 @@ $scope = currentTerminalId();
 $from       = trim((string)($_GET['from'] ?? ''));
 $to         = trim((string)($_GET['to'] ?? ''));
 $q          = trim((string)($_GET['q'] ?? ''));
-$dispatcher = reqInt('user_id', 0, 0, 100000);
-$fTerminal  = $scope ?? reqInt('terminal_id', 0, 0, 100000);
+$dispatchers = array_map('intval', filterValues('user_id'));
+$fTerminals  = array_map('intval', filterValues('terminal_id'));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
     $from = date('Y-m-d', strtotime('-30 days'));
@@ -36,14 +36,16 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
 // the follow-up assignment to show previous -> new driver.
 $where  = " WHERE a.returned_at IS NOT NULL AND a.return_reason = 'transfer'";
 $params = [];
-if ($fTerminal > 0) {
-    $where .= ' AND a.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND a.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($dispatcher > 0) {
-    $where .= ' AND (a.returned_by = ? OR a.issued_by = ?)';
-    $params[] = $dispatcher;
-    $params[] = $dispatcher;
+if ($dispatchers !== []) {
+    // Multi-select: any of the chosen dispatchers, on either side of the
+    // transfer (returned_by or issued_by).
+    $in = implode(',', array_fill(0, count($dispatchers), '?'));
+    $where .= " AND (a.returned_by IN ($in) OR a.issued_by IN ($in))";
+    array_push($params, ...$dispatchers, ...$dispatchers);
 }
 if ($q !== '') {
     $where .= ' AND (s.mobile_number LIKE ? OR prev_d.name LIKE ? OR prev_d.badge_number LIKE ?)';
@@ -134,44 +136,35 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-2">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">From</label>
             <input type="date" class="form-control" name="from" value="<?= e($from) ?>">
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">To</label>
             <input type="date" class="form-control" name="to" value="<?= e($to) ?>">
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">SIM / previous driver</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
-                   placeholder="SIM number / name / badge">
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
+                       placeholder="SIM number / name / badge">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="reports/transfers.php">Reset</a>
+            </div>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Dispatcher</label>
-            <select class="form-select" name="user_id">
-                <option value="">All</option>
-                <?php foreach ($users as $uid => $uname): ?>
-                    <option value="<?= $uid ?>"<?= $dispatcher === $uid ? ' selected' : '' ?>><?= e($uname) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-1">
-            <button class="btn btn-outline-primary btn-sm w-100" type="submit">Go</button>
+            <?= checkboxFilterGroup('user_id', $users, array_map('strval', $dispatchers)) ?>
         </div>
     </div>
 </form>

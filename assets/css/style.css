@@ -409,6 +409,84 @@ th.tt-num, td.tt-num { width: 46px; text-align: right; white-space: nowrap; colo
     font-size: .86rem;
 }
 
+/* Filter dropdowns (checkbox multi-select): restrained sizes - fixed-width
+   toggle showing only the selection count (+ pill badge), Select all / Clear
+   header, scrollable menu (reference: compact multi-select pattern). */
+/* Filter bars stay on ONE row on desktop: units are content-width and never
+   wrap from lg up (small screens may still wrap as a fallback). */
+@media (min-width: 992px) {
+    .filter-bar,
+    .filter-bar form {
+        flex-wrap: nowrap;
+    }
+    .filter-bar > div,
+    .filter-bar form > div {
+        flex: 0 0 auto;
+    }
+}
+.filter-dd > .btn {
+    min-width: 106px;
+    text-align: left;
+}
+.filter-dd .sl-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.2rem;
+    height: 1.2rem;
+    padding: 0 .3rem;
+    margin-left: .35rem;
+    border-radius: 999px;
+    background: #0d6efd;
+    color: #fff;
+    font-size: .7rem;
+    font-weight: 600;
+    line-height: 1;
+}
+.filter-dd .dropdown-menu {
+    max-height: 300px;
+    overflow-y: auto;
+    min-width: 200px;
+    max-width: 260px;
+    padding: .35rem .5rem;
+}
+.filter-dd .dropdown-item {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    font-size: .87rem;
+    padding: .28rem .35rem;
+}
+/* Neutralise Bootstrap's .form-check indent + float/-1.25em pull, which
+   otherwise pushes the checkbox past the menu's left edge (the scrollable
+   menu then clips it). Mirror the .tt-menu (Columns) item layout. */
+.filter-dd .dropdown-item.form-check {
+    padding-left: .35rem;
+    min-height: 0;
+}
+.filter-dd .form-check-input {
+    float: none;
+    margin-left: 0;
+    position: static;
+}
+.filter-dd .sl-dd-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: .2rem .35rem .35rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    margin-bottom: .25rem;
+}
+.filter-dd .sl-dd-head .btn-link {
+    color: #0d6efd;
+    font-size: .8rem;
+    font-weight: 500;
+    text-decoration: none;
+}
+.filter-dd .sl-dd-head .btn-link:hover {
+    text-decoration: underline;
+}
+
 .filter-bar .form-label {
     font-size: .72rem;
     font-weight: 600;

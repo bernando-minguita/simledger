@@ -14,33 +14,35 @@ requirePermission('report.view');
 $pdo   = $GLOBALS['pdo'];
 $scope = currentTerminalId();
 
-$fTerminal = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$fStatus   = (string)($_GET['status'] ?? '');
-$coverage  = (string)($_GET['coverage'] ?? '');   // with | none | ''
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fStatuses  = array_values(array_intersect(
+    filterValues('status'), array_keys(driverStatusOptions())
+));
+$coverages  = array_values(array_intersect(
+    filterValues('coverage'), ['with', 'none']
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 $statuses = driverStatusOptions();
-if (!isset($statuses[$fStatus])) {
-    $fStatus = '';
-}
 
 $where  = ' WHERE d.is_active = 1';
 $params = [];
-if ($fTerminal > 0) {
-    $where .= ' AND d.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND d.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($fStatus !== '') {
-    $where .= ' AND d.status = ?';
-    $params[] = $fStatus;
+if ($fStatuses !== []) {
+    $where .= ' AND d.status IN (' . implode(',', array_fill(0, count($fStatuses), '?')) . ')';
+    array_push($params, ...$fStatuses);
 }
-if ($coverage === 'with') {
+// Reachability is binary: both checked = either, no filter.
+if ($coverages === ['with']) {
     $where .= ' AND (EXISTS(SELECT 1 FROM driver_contact_numbers c
                              WHERE c.driver_id = d.id AND c.is_active = 1)
                    OR EXISTS(SELECT 1 FROM driver_sim_assignments a
                               WHERE a.driver_id = d.id AND a.returned_at IS NULL))';
-} elseif ($coverage === 'none') {
+} elseif ($coverages === ['none']) {
     $where .= ' AND NOT EXISTS(SELECT 1 FROM driver_contact_numbers c
                                 WHERE c.driver_id = d.id AND c.is_active = 1)
               AND NOT EXISTS(SELECT 1 FROM driver_sim_assignments a
@@ -68,11 +70,12 @@ $summaryStmt = $pdo->prepare(
        FROM drivers d
        JOIN terminals t ON t.id = d.terminal_id
       WHERE d.is_active = 1 AND d.status = "active"'
-        . ($fTerminal > 0 ? ' AND d.terminal_id = ?' : '') . '
+        . ($fTerminals !== [] ? ' AND d.terminal_id IN ('
+            . implode(',', array_fill(0, count($fTerminals), '?')) . ')' : '') . '
       GROUP BY t.id, t.name
       ORDER BY t.name'
 );
-$summaryStmt->execute($fTerminal > 0 ? [$fTerminal] : []);
+$summaryStmt->execute($fTerminals);
 $summary = $summaryStmt->fetchAll();
 
 // Detail rows for the selected coverage filter.
@@ -170,40 +173,28 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">Coverage</label>
-            <select class="form-select" name="coverage">
-                <option value="">Either</option>
-                <option value="with"<?= $coverage === 'with' ? ' selected' : '' ?>>Reachable (number or SIM)</option>
-                <option value="none"<?= $coverage === 'none' ? ' selected' : '' ?>>Not reachable</option>
-            </select>
+            <?= checkboxFilterGroup('coverage', ['with' => 'Reachable (number or SIM)', 'none' => 'Not reachable'], array_map('strval', $coverages)) ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">Driver status</label>
-            <select class="form-select" name="status">
-                <option value="">All</option>
-                <?php foreach ($statuses as $skey => $slabel): ?>
-                    <option value="<?= e($skey) ?>"<?= $fStatus === $skey ? ' selected' : '' ?>><?= e($slabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('status', $statuses, array_map('strval', $fStatuses)) ?>
         </div>
-        <div class="col-md-3">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Filter</button>
-            <a class="btn btn-link btn-sm" href="contact-coverage.php">Reset</a>
+        <div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" type="submit">Apply filters</button>
+                <a class="btn btn-link btn-sm" href="contact-coverage.php">Reset</a>
+            </div>
         </div>
     </div>
 </form>

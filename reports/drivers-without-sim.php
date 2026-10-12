@@ -15,37 +15,39 @@ $pdo   = $GLOBALS['pdo'];
 $scope = currentTerminalId();
 
 $q         = trim((string)($_GET['q'] ?? ''));
-$fTerminal = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$fStatus   = (string)($_GET['status'] ?? '');
-$contact   = (string)($_GET['contact'] ?? '');   // with | none
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fStatuses  = array_values(array_intersect(
+    filterValues('status'), array_keys(driverStatusOptions())
+));
+$contacts   = array_values(array_intersect(
+    filterValues('contact'), ['with', 'none']
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 $statuses = driverStatusOptions();
-if (!isset($statuses[$fStatus])) {
-    $fStatus = '';
-}
 
 $where  = ' WHERE d.is_active = 1 AND NOT EXISTS(
                 SELECT 1 FROM driver_sim_assignments a
                  WHERE a.driver_id = d.id AND a.returned_at IS NULL)';
 $params = [];
-if ($fTerminal > 0) {
-    $where .= ' AND d.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND d.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($fStatus !== '') {
-    $where .= ' AND d.status = ?';
-    $params[] = $fStatus;
+if ($fStatuses !== []) {
+    $where .= ' AND d.status IN (' . implode(',', array_fill(0, count($fStatuses), '?')) . ')';
+    array_push($params, ...$fStatuses);
 }
 if ($q !== '') {
     $where .= ' AND (d.badge_number LIKE ? OR d.name LIKE ?)';
     array_push($params, '%' . $q . '%', '%' . $q . '%');
 }
-if ($contact === 'with') {
+// Contact presence is binary: both checked = either, no filter.
+if ($contacts === ['with']) {
     $where .= ' AND EXISTS(SELECT 1 FROM driver_contact_numbers c
                             WHERE c.driver_id = d.id AND c.is_active = 1)';
-} elseif ($contact === 'none') {
+} elseif ($contacts === ['none']) {
     $where .= ' AND NOT EXISTS(SELECT 1 FROM driver_contact_numbers c
                                 WHERE c.driver_id = d.id AND c.is_active = 1)';
 }
@@ -128,44 +130,30 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Search</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>" placeholder="Badge / name">
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>" placeholder="Badge / name">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="drivers-without-sim.php">Reset</a>
+            </div>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Driver status</label>
-            <select class="form-select" name="status">
-                <option value="">All</option>
-                <?php foreach ($statuses as $skey => $slabel): ?>
-                    <option value="<?= e($skey) ?>"<?= $fStatus === $skey ? ' selected' : '' ?>><?= e($slabel) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('status', $statuses, array_map('strval', $fStatuses)) ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Has personal number</label>
-            <select class="form-select" name="contact">
-                <option value="">Either</option>
-                <option value="with"<?= $contact === 'with' ? ' selected' : '' ?>>Yes</option>
-                <option value="none"<?= $contact === 'none' ? ' selected' : '' ?>>No</option>
-            </select>
-        </div>
-        <div class="col-md-3">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Filter</button>
-            <a class="btn btn-link btn-sm" href="drivers-without-sim.php">Reset</a>
+            <?= checkboxFilterGroup('contact', ['with' => 'Yes', 'none' => 'No'], array_map('strval', $contacts)) ?>
         </div>
     </div>
 </form>

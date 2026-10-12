@@ -22,15 +22,16 @@ $scope   = currentTerminalId();
 $canAdd  = can('reference.manage');
 
 // --- filters ---------------------------------------------------------------
-$q         = trim((string)($_GET['q'] ?? ''));
-$fTerminal = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$fCarrier  = reqInt('carrier_id', 0, 0, 100000);
-$fStatus   = (string)($_GET['status'] ?? '');
-if (!in_array($fStatus, array_keys(simStatusOptions()), true)) {
-    $fStatus = '';
-}
+// Checkbox groups (multi-select): none checked = all; legacy single-value
+// URLs (?status=assigned) still work through filterValues().
+$q          = trim((string)($_GET['q'] ?? ''));
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$fCarriers  = array_map('intval', filterValues('carrier_id'));
+$fStatuses  = array_values(array_intersect(
+    filterValues('status'), array_keys(simStatusOptions())
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 
 $sortMap = [
@@ -60,17 +61,20 @@ if ($q !== '') {
     $qNorm = normalizePhone($q);
     array_push($params, $like, '%' . ($qNorm ?? $q) . '%', $like, $like);
 }
-if ($fTerminal > 0) {
-    $where .= ' AND s.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND s.terminal_id IN ('
+        . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($fCarrier > 0) {
-    $where .= ' AND s.carrier_id = ?';
-    $params[] = $fCarrier;
+if ($fCarriers !== []) {
+    $where .= ' AND s.carrier_id IN ('
+        . implode(',', array_fill(0, count($fCarriers), '?')) . ')';
+    array_push($params, ...$fCarriers);
 }
-if ($fStatus !== '') {
-    $where .= ' AND s.status = ?';
-    $params[] = $fStatus;
+if ($fStatuses !== []) {
+    $where .= ' AND s.status IN ('
+        . implode(',', array_fill(0, count($fStatuses), '?')) . ')';
+    array_push($params, ...$fStatuses);
 }
 
 $from = ' FROM company_sims s
@@ -248,46 +252,31 @@ $baseUrl = 'sims.php?' . filtersUrl();
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">Search</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
-                   placeholder="Number / ICCID / SIM ID">
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
+                       placeholder="Number / ICCID / SIM ID">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="sims.php">Reset</a>
+            </div>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Carrier</label>
-            <select class="form-select" name="carrier_id">
-                <option value="">All</option>
-                <?php foreach (carrierOptions() as $cid => $cname): ?>
-                    <option value="<?= $cid ?>"<?= $fCarrier === $cid ? ' selected' : '' ?>><?= e($cname) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <?= checkboxFilterGroup('carrier_id', carrierOptions(), array_map('strval', $fCarriers)) ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Status</label>
-            <select class="form-select" name="status">
-                <option value="">All</option>
-                <?php foreach (simStatusOptions() as $skey => $slabel): ?>
-                    <option value="<?= e($skey) ?>"<?= $fStatus === $skey ? ' selected' : '' ?>><?= e($slabel) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-3">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Search</button>
-            <a class="btn btn-link btn-sm" href="sims.php">Reset</a>
+            <?= checkboxFilterGroup('status', simStatusOptions(), array_map('strval', $fStatuses)) ?>
         </div>
     </div>
 </form>

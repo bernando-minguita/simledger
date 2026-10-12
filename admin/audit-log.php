@@ -17,9 +17,9 @@ requirePermission('audit.view');
 
 // --- filters ---------------------------------------------------------------
 $q        = trim((string)($_GET['q'] ?? ''));
-$fAction  = trim((string)($_GET['action'] ?? ''));
-$fUser    = reqInt('user_id', 0, 0, 100000000);
-$fTerm    = reqInt('terminal_id', 0, 0, 100000);
+$fActions   = filterValues('action');                       // DB-defined action keys
+$fUsers     = array_map('intval', filterValues('user_id'));
+$fTerminals = array_map('intval', filterValues('terminal_id'));
 $from     = trim((string)($_GET['from'] ?? ''));
 $to       = trim((string)($_GET['to'] ?? ''));
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
@@ -51,17 +51,17 @@ if ($q !== '') {
     $like = '%' . $q . '%';
     array_push($params, $like, $like, $like, $like);
 }
-if ($fAction !== '') {
-    $where .= ' AND l.action = ?';
-    $params[] = $fAction;
+if ($fActions !== []) {
+    $where .= ' AND l.action IN (' . implode(',', array_fill(0, count($fActions), '?')) . ')';
+    array_push($params, ...$fActions);
 }
-if ($fUser > 0) {
-    $where .= ' AND l.user_id = ?';
-    $params[] = $fUser;
+if ($fUsers !== []) {
+    $where .= ' AND l.user_id IN (' . implode(',', array_fill(0, count($fUsers), '?')) . ')';
+    array_push($params, ...$fUsers);
 }
-if ($fTerm > 0) {
-    $where .= ' AND l.terminal_id = ?';
-    $params[] = $fTerm;
+if ($fTerminals !== []) {
+    $where .= ' AND l.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
 
 $countStmt = $pdo->prepare('SELECT COUNT(*) FROM audit_logs l' . $where);
@@ -127,51 +127,34 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-2">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">From</label>
             <input type="date" class="form-control" name="from" value="<?= e($from) ?>">
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">To</label>
             <input type="date" class="form-control" name="to" value="<?= e($to) ?>">
         </div>
-        <div class="col-md-2">
-            <label class="form-label">Action</label>
-            <select class="form-select" name="action">
-                <option value="">All</option>
-                <?php foreach ($actions as $a): ?>
-                    <option value="<?= e($a) ?>"<?= $fAction === $a ? ' selected' : '' ?>><?= e($a) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">User</label>
-            <select class="form-select" name="user_id">
-                <option value="">All</option>
-                <?php foreach ($users as $uid => $uname): ?>
-                    <option value="<?= $uid ?>"<?= $fUser === $uid ? ' selected' : '' ?>><?= e($uname) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">Terminal</label>
-            <select class="form-select" name="terminal_id">
-                <option value="">All</option>
-                <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                    <option value="<?= $tid ?>"<?= $fTerm === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Search</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>" placeholder="payload…">
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>" placeholder="payload…">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="audit-log.php">Reset</a>
+            </div>
         </div>
-    </div>
-    <div class="row mt-2">
-        <div class="col">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Filter</button>
-            <a class="btn btn-link btn-sm" href="audit-log.php">Reset</a>
+        <div>
+            <label class="form-label">Action</label>
+            <?= checkboxFilterGroup('action', array_combine($actions, $actions), $fActions) ?>
+        </div>
+        <div>
+            <label class="form-label">User</label>
+            <?= checkboxFilterGroup('user_id', $users, array_map('strval', $fUsers)) ?>
+        </div>
+        <div>
+            <label class="form-label">Terminal</label>
+            <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
         </div>
     </div>
 </form>

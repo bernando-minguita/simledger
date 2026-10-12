@@ -119,6 +119,39 @@
         });
     }
     window.slDialog = slDialog;
+    // Filter-dropdown helpers: keep the toggle ("N selected" + pill badge)
+    // in sync with ticked boxes, and wire the Select all / Clear header.
+    function slUpdateCount(dd) {
+        if (!dd) { return; }
+        var n = dd.querySelectorAll('input[type="checkbox"]:checked').length;
+        var txt = dd.querySelector('[data-sl-text]');
+        var badge = dd.querySelector('.sl-badge');
+        if (txt) { txt.textContent = n === 0 ? 'All' : n + ' selected'; }
+        if (badge) {
+            badge.textContent = n;
+            badge.classList.toggle('d-none', n === 0);
+        }
+    }
+
+    document.addEventListener('change', function (e) {
+        var box = e.target;
+        if (!box || box.type !== 'checkbox' || !box.closest) { return; }
+        slUpdateCount(box.closest('.filter-dd'));
+    });
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('[data-sl-all], [data-sl-clear]') : null;
+        if (!btn) { return; }
+        e.preventDefault();
+        var dd = btn.closest('.filter-dd');
+        if (!dd) { return; }
+        var check = btn.hasAttribute('data-sl-all');
+        dd.querySelectorAll('input[type="checkbox"]').forEach(function (b) {
+            b.checked = check;
+        });
+        slUpdateCount(dd);
+    });
+
     // One delegated listener instead of per-form binding: forms injected or
     // replaced by a table-toolkit partial refresh are covered automatically.
     document.addEventListener('submit', function (e) {

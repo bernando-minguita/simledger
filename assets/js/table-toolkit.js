@@ -249,10 +249,27 @@
         Array.prototype.forEach.call(filterForms(), function (form) {
             Array.prototype.forEach.call(form.elements, function (el) {
                 if (!el.name) { return; }
+                if (el.type === 'checkbox' || el.type === 'radio') {
+                    // Checkbox groups share one name (name[]): match by value.
+                    var wanted = el.value;
+                    var list = doc.getElementsByName(el.name);
+                    var found = false;
+                    for (var i = 0; i < list.length; i++) {
+                        if (list[i].value === wanted) {
+                            el.checked = list[i].checked;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) { el.checked = false; }
+                    // Let listeners (filter-dropdown counts) react as if the
+                    // user had ticked the box.
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    return;
+                }
                 var src = doc.getElementsByName(el.name)[0];
                 if (!src) { return; }
-                if (el.type === 'checkbox' || el.type === 'radio') { el.checked = src.checked; }
-                else { el.value = src.value; }
+                el.value = src.value;
             });
         });
     }
@@ -405,8 +422,16 @@
                 // Start from the current URL so the OTHER regions' params
                 // (and sort/dir) survive, then overlay this form's fields.
                 var params = new URLSearchParams(location.search);
+                // Multi-value fields (checkbox groups post name[]=a&name[]=b):
+                // drop every existing occurrence first, then APPEND all
+                // values - params.set() would keep only the last checked box.
+                var names = [];
                 new FormData(form).forEach(function (value, name) {
-                    params.set(name, value);
+                    if (names.indexOf(name) === -1) { names.push(name); }
+                });
+                names.forEach(function (name) { params.delete(name); });
+                new FormData(form).forEach(function (value, name) {
+                    params.append(name, value);
                 });
                 params.delete(pageParam);
                 var url = location.pathname + (params.toString() ? '?' + params.toString() : '');

@@ -155,3 +155,69 @@ function terminalSelect(int|string|null $selected, bool $includeAll = false, str
 
     return $out;
 }
+
+/**
+ * Checkbox-group filter control (multi-select) rendered as a Bootstrap
+ * dropdown with checkboxes - the same pattern as the table Columns menu.
+ * Toggle shows "All" (none checked = no filter = all records) or "n
+ * selected". Inputs are named "<name>[]" so PHP receives an array;
+ * filterValues() reads them back. Long option lists scroll. The toggle
+ * uses data-bs-auto-close="outside" so ticking boxes keeps the menu open.
+ */
+function checkboxFilterGroup(string $name, array $options, array $selected): string
+{
+    $n     = count($selected);
+    $state = $n === 0 ? 'All' : $n . ' selected';
+
+    $html = '<div class="dropdown filter-dd">'
+        . '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"'
+        . ' data-bs-toggle="dropdown" data-bs-auto-close="outside"'
+        . ' data-sl-count aria-expanded="false">'
+        . '<span data-sl-text>' . e($state) . '</span>'
+        . '<span class="sl-badge' . ($n > 0 ? '' : ' d-none') . '">' . $n . '</span>'
+        . '</button>'
+        . '<ul class="dropdown-menu">'
+        . '<li class="sl-dd-head d-flex justify-content-between align-items-center">'
+        . '<button type="button" class="btn btn-link p-0" data-sl-all>Select all</button>'
+        . '<button type="button" class="btn btn-link p-0" data-sl-clear>Clear</button>'
+        . '</li>';
+
+    foreach ($options as $val => $label) {
+        $val = (string)$val;
+        if ($val === '') {
+            continue;
+        }
+        $id = 'ff_' . e($name) . '_' . preg_replace('/[^A-Za-z0-9]+/', '_', $val);
+        $html .= '<li><label class="dropdown-item" for="' . $id . '">'
+            . '<input class="form-check-input me-1" type="checkbox" name="' . e($name) . '[]"'
+            . ' value="' . e($val) . '" id="' . $id . '"'
+            . (in_array($val, $selected, true) ? ' checked' : '') . '>'
+            . '<span>' . e((string)$label) . '</span></label></li>';
+    }
+
+    return $html . '</ul></div>';
+}
+
+/**
+ * Normalize a checkbox-filter GET parameter ("name[]" URLs) to an array of
+ * trimmed, non-empty, de-duplicated strings. Legacy single-value links
+ * (?status=assigned) are accepted too. Empty result = no filter.
+ */
+function filterValues(string $key): array
+{
+    $raw = $_GET[$key] ?? [];
+    if (!is_array($raw)) {
+        $raw = [$raw];
+    }
+
+    $out = [];
+    foreach ($raw as $v) {
+        $v = trim((string)$v);
+        if ($v !== '' && !in_array($v, $out, true)) {
+            $out[] = $v;
+        }
+    }
+
+    return $out;
+}
+

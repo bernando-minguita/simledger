@@ -18,10 +18,12 @@ $scope = currentTerminalId();
 $from      = trim((string)($_GET['from'] ?? ''));
 $to        = trim((string)($_GET['to'] ?? ''));
 $q         = trim((string)($_GET['q'] ?? ''));
-$fTerminal = $scope ?? reqInt('terminal_id', 0, 0, 100000);
-$state     = (string)($_GET['state'] ?? '');   // open | closed | ''
+$fTerminals = array_map('intval', filterValues('terminal_id'));
+$states     = array_values(array_intersect(
+    filterValues('state'), ['open', 'closed']
+));
 if ($scope !== null) {
-    $fTerminal = $scope;
+    $fTerminals = [$scope];   // dispatcher: server-enforced terminal scope
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
     $from = date('Y-m-d', strtotime('-90 days'));
@@ -32,14 +34,16 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
 
 $where  = ' WHERE a.issued_at <= ?';
 $params = [$to . ' 23:59:59'];
-if ($fTerminal > 0) {
-    $where .= ' AND a.terminal_id = ?';
-    $params[] = $fTerminal;
+if ($fTerminals !== []) {
+    $where .= ' AND a.terminal_id IN (' . implode(',', array_fill(0, count($fTerminals), '?')) . ')';
+    array_push($params, ...$fTerminals);
 }
-if ($state === 'open') {
+// State is binary: none or both checked = either (the wide date-window
+// branch); a single selection narrows to that side of the ledger.
+if ($states === ['open']) {
     $where .= ' AND a.returned_at IS NULL AND a.issued_at >= ?';
     $params[] = $from . ' 00:00:00';
-} elseif ($state === 'closed') {
+} elseif ($states === ['closed']) {
     $where .= ' AND a.returned_at IS NOT NULL AND a.returned_at >= ?';
     $params[] = $from . ' 00:00:00';
 } else {
@@ -123,42 +127,34 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <form method="get" class="filter-bar mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-2">
+    <div class="d-flex flex-wrap align-items-end gap-2 gap-md-3">
+        <div>
             <label class="form-label">From</label>
             <input type="date" class="form-control" name="from" value="<?= e($from) ?>">
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">To</label>
             <input type="date" class="form-control" name="to" value="<?= e($to) ?>">
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">Terminal</label>
             <?php if ($scope !== null): ?>
                 <input type="text" class="form-control" value="<?= e(terminalOptions()[$scope] ?? '') ?>" disabled>
             <?php else: ?>
-                <select class="form-select" name="terminal_id">
-                    <option value="">All</option>
-                    <?php foreach (terminalOptions(false) as $tid => $tname): ?>
-                        <option value="<?= $tid ?>"<?= $fTerminal === $tid ? ' selected' : '' ?>><?= e($tname) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <?= checkboxFilterGroup('terminal_id', terminalOptions(false), array_map('strval', $fTerminals)) ?>
             <?php endif; ?>
         </div>
-        <div class="col-md-2">
+        <div>
             <label class="form-label">State</label>
-            <select class="form-select" name="state">
-                <option value="">Either</option>
-                <option value="open"<?= $state === 'open' ? ' selected' : '' ?>>Open (current)</option>
-                <option value="closed"<?= $state === 'closed' ? ' selected' : '' ?>>Closed</option>
-            </select>
+            <?= checkboxFilterGroup('state', ['open' => 'Open (current)', 'closed' => 'Closed'], array_map('strval', $states)) ?>
         </div>
-        <div class="col-md-3">
+        <div>
             <label class="form-label">SIM / driver</label>
-            <input type="text" class="form-control" name="q" value="<?= e($q) ?>">
-        </div>
-        <div class="col-md-1">
-            <button class="btn btn-outline-primary btn-sm w-100" type="submit">Go</button>
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" name="q" value="<?= e($q) ?>">
+                <button class="btn btn-outline-primary" type="submit">Search</button>
+                <a class="btn btn-link" href="reports/assignments.php">Reset</a>
+            </div>
         </div>
     </div>
 </form>
