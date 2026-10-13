@@ -79,11 +79,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             throw new RuntimeException('Unknown action.');
         }
     } catch (Throwable $e) {
-        $error      = $e->getMessage();
+        $error      = friendlyError($e, 'A token with that name already exists.');
         $plainToken = '';
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'A token with that name already exists.';
-        }
     }
 }
 

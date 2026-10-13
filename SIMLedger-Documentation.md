@@ -2,7 +2,7 @@
 
 ## Complete Logic and Workflow Documentation (As-Is)
 
-> This document describes the **current, running behavior** of the Driver SIM & Contact Management System (SIMLedger). It is reverse-documentation of the system as it exists today. It does not propose new features, redesigns, or improvements. Items that could not be fully confirmed from the running system are marked **[TO VERIFY]** and collected in the final section.
+> This document describes the **current, running behavior** of the Driver SIM & Contact Management System (SIMLedger). It is reverse-documentation of the system as it exists today. It does not propose new features, redesigns, or improvements. Items that could not be fully confirmed from the running system were previously marked **[TO VERIFY]**; the verification rounds of 2026-10-09 / 2026-10-10 resolved them (the confirmed facts are folded into the relevant sections), and the external checks that remain are collected in [Open Verification Items](#open-verification-items).
 
 ---
 
@@ -31,7 +31,7 @@
 - [Integration Points (current, logical)](#integration-points-current-logical)
 - [External API (driver data sync, current)](#external-api-driver-data-sync-current)
 - [Glossary](#glossary)
-- [Assumptions [TO VERIFY]](#assumptions-to-verify)
+- [Open Verification Items](#open-verification-items)
 
 ---
 
@@ -75,7 +75,7 @@ Roles are database records (not hard-coded); three roles exist by default and ad
 - Runs all SIM transactions and CSV imports.
 - Views the audit log.
 - Is not confined to any terminal (sees and acts across all terminals).
-- Created by the installer; cannot be deleted through the UI. **[TO VERIFY: no UI path exists to delete any role or user account; only deactivation exists.]**
+- Created by the installer; cannot be deleted through the UI. No UI path exists to delete any role or user account — only deactivation (`is_active = 0`) exists (verified 2026-10-13 by full code scan: no delete action or `DELETE` statement for users/roles anywhere in the application).
 
 ### 2. Operations Manager (role key `manager`)
 
@@ -248,7 +248,7 @@ Append-only event records: timestamp, acting user (id + username snapshot), acti
 
 ### App Settings
 
-Key/value configuration rows; business options are read from settings rather than hard-coded. Complete contents (verified 2026-10-09 against the live database, refreshed 2026-10-10 — 8 rows):
+Key/value configuration rows; business options are read from settings rather than hard-coded. Complete contents (verified against the live database 2026-10-09, refreshed 2026-10-13 — 8 keys read at runtime, plus two orphaned rows on databases upgraded from older releases):
 
 | Key | Read at runtime by | Purpose |
 |---|---|---|
@@ -257,11 +257,13 @@ Key/value configuration rows; business options are read from settings rather tha
 | `mig_status_rth_removed` | `migrateSimStatusEnum()` | Migration flag: retired `returned_to_hr` status removed from the ENUM |
 | `perm_bootstrap_version` | permission bootstrap | Migration flag: default roles/permissions seeded |
 | `mig_api_tokens` | `migrateApiTokens()` | Migration flag: `api_tokens` table created + `api.manage` permission registered |
+| `mig_user_admin` | `userAdminBootstrap()` | Migration flag: `users.must_change_password` column applied |
+| `mig_login_attempts` | `loginThrottleBootstrap()` | Migration flag: `login_attempts` table applied (sign-in throttle) |
 | `app_name` | *(not read anywhere)* | Seeded by the installer; page titles actually use the `APP_NAME` constant from `config/config.php` |
 | `allow_multiple_sims_per_driver` | *(orphaned — not read anywhere)* | Vestigial row from the removed multi-SIM runtime switch; the installer no longer seeds it |
 | `mig_status_returned_to_hr` | *(orphaned — superseded by `mig_status_rth_removed`)* | Historical flag from when the `returned_to_hr` status still existed |
 
-The first five keys have runtime readers; the last three are orphaned/historical rows.
+All keys except the last two have runtime readers; `allow_multiple_sims_per_driver` and `mig_status_returned_to_hr` are orphaned/historical rows present only on databases upgraded from older releases.
 
 > **Note on "Group":** the system has no separate Group entity. Roles serve as the permission groups (group-level assignment), and the six permission categories (SIM Management, Drivers, Contacts, Reports, Data, Administration) are display groupings of the permission catalog.
 
@@ -377,7 +379,7 @@ Contact numbers are managed on the driver profile page (permission `contact.mana
 
 ### Sign-in and Two-Factor Authentication
 
-1. **Credentials.** The user submits username and password on the sign-in page. When reCAPTCHA v2 (invisible) keys are configured in `config/config.php`, the invisible widget runs first and the server verifies the token against Google **before** the password check. Verification is fail-closed: a missing/invalid token or an unreachable Google service rejects the attempt. The captcha is automatically skipped on `localhost` / `127.0.0.1` / `::1` (Google does not accept localhost site keys), and with empty keys the feature is entirely off — sign-in behaves exactly as it always did.
+1. **Credentials.** The user submits username and password on the sign-in page. When reCAPTCHA v2 (invisible) keys are configured in `config/config.php`, the invisible widget runs first and the server verifies the token against Google **before** the password check. Verification is fail-closed: a missing/invalid token or an unreachable Google service rejects the attempt. The captcha is automatically skipped on `localhost` / `127.0.0.1` / `::1` (Google does not accept localhost site keys) — decided by the client address (`REMOTE_ADDR`), never the client-controlled Host header — and with empty keys the feature is entirely off, so sign-in behaves exactly as it always did. Before the password is checked, a throttle counts failed sign-ins per username and per client IP (5 / 20 failures inside a 15-minute window lock sign-in for the remainder of the window); every failed attempt is recorded as a `FAILED_LOGIN` audit event, and a successful sign-in clears the username's counter (`includes/login-throttle.php`).
 2. **Optional TOTP step.** If the account has two-factor enabled (self-service on the Profile page), a valid password does **not** open the session: a pending step (5-minute expiry, session id regenerated) is stored and a 6-digit code form is shown instead. **Sign-in reminder:** while an account has *no* 2FA, every page after sign-in carries a dismissible banner nudging the user to enrol (`two_factor_reminder` session flag set during login, live-checked against `users.totp_enabled`; **Dismiss** clears it for the session, enabling 2FA clears it permanently, an admin Reset 2FA takes effect at the user's next sign-in; never shown while impersonating).
 3. **Code verification.** A correct time-based code (RFC 6238: SHA-1, 6 digits, 30-second period, ±1 step window for clock drift) completes the sign-in — fresh session id, `LOGIN` + `LOGIN_2FA` audit events, redirect to the dashboard. Wrong codes are rejected with an attempts counter; after **10 failed attempts** the pending step is dropped and the user must start over. "Back to sign in" (`?cancel_2fa=1`) clears a pending step; the next sign-in still challenges while 2FA remains enabled.
 4. **Enrolment (Profile → Two-Factor Authentication).** *Enable* generates a 16-byte base32 secret held in a pending state; the profile then shows a QR code — an `otpauth://TOTP/SIMLedger:<username>` URI rendered **locally** by the vendored MIT `qrcode.min.js`, so the secret never leaves the page — plus the grouped manual key. *Confirm* requires a valid code before the account switches on (`ENABLE_2FA` audit). *Disable* also requires a current valid code (`DISABLE_2FA` audit). *Cancel enrolment* discards the pending secret.
@@ -458,9 +460,14 @@ Applied automatically to every data table in the application:
 
 23. Permission checks happen server-side on every page (403 page on failure) and also drive sidebar visibility.
 24. Deny overrides beat allow overrides; the admin role cannot be restricted.
-25. **Sign-in hardening.** reCAPTCHA verification is enforced only when keys are configured **and** the host is not localhost (fail-closed when enabled). TOTP challenges expire after 5 minutes and allow at most 10 failed code attempts before the pending step is dropped.
+25. **Sign-in hardening.** reCAPTCHA verification is enforced only when keys are configured **and** the client is not a loopback address — decided by `REMOTE_ADDR`, never the Host header (fail-closed when enabled). Failed sign-ins are throttled: 5 failures per username or 20 per client IP inside a 15-minute window lock sign-in for the rest of the window; each failure is audited (`FAILED_LOGIN`) and a success clears the username counter. TOTP challenges expire after 5 minutes and allow at most 10 failed code attempts before the pending step is dropped.
 26. **2FA lifecycle.** Enabling and disabling two-factor authentication each require a valid current TOTP code; only the admin Reset 2FA action bypasses the code (audited). Password verification and all existing session rules are unchanged.
 27. **Country access restriction (GeoIP).** When `GEO_BLOCK_ENABLED` is `true`, a request whose resolved country falls outside `GEO_BLOCK_ALLOW_COUNTRIES` (default `SA`) is rejected with a standalone 403 **before** authentication. localhost / `127.0.0.0/8` / `::1` and `GEO_BLOCK_BYPASS_IPS` always pass; the guard fails open with a log line when the country database is unavailable (unless `GEO_BLOCK_FAIL = closed`) and never fatals. The feature ships disabled and is not permission-scoped — it applies uniformly to every visitor.
+
+**Master data and record lifecycle**
+
+28. Dropdown lookups show active terminals/carriers/agencies only (`is_active = 1`, `includes/lookups.php`); CSV import resolves master records against active rows only, so an inactive terminal/carrier/agency makes the row fail as "unknown"; and export/report queries join master tables **without** active-flag predicates, so historical rows always render the master name even after the record is deactivated. (Verified by code inspection 2026-10-09; the conclusion is query-level — individual export edge cases were not all executed.)
+29. Deactivated drivers and users are re-activated **only** through the edit form's Active checkbox (`admin/drivers.php`, `admin/users.php`, and the reference-data edit forms). No restore/reactivate route, audit action, or `SET is_active = 1` path exists anywhere else in the application code (verified 2026-10-09 by full code scan).
 
 ---
 
@@ -486,7 +493,7 @@ Notes: the only path out of `assigned` for normal operations is a closing transa
 | **active** | Eligible to receive SIMs (also requires `is_active = 1`) |
 | **resigned / terminated / inactive / transferred** | Not eligible; chosen during offboarding or data correction |
 
-Separately, the `is_active` flag implements soft deactivation. Deactivation is reversible in data terms (an admin can re-activate a record), but the system records the state changes in the audit trail. **[TO VERIFY: a UI action to re-activate a deactivated driver exists only via the edit form's Active checkbox; there is no dedicated "restore" workflow.]**
+Separately, the `is_active` flag implements soft deactivation. Deactivation is reversible in data terms (an admin can re-activate a record), but the system records the state changes in the audit trail. Re-activation happens only through the edit form's Active checkbox — there is no dedicated "restore" workflow (verified 2026-10-09 by full code scan; see Business Rules rule 29).
 
 ### Assignment lifecycle
 
@@ -573,7 +580,7 @@ The system has **no push channels** (no SMS, no email, no browser notifications)
 
 **What is recorded** (actor username, timestamp, client IP, entity, old and new values in JSON where applicable):
 
-- Authentication: successful sign-in (`LOGIN`); successful sign-in completed with a 2FA code (`LOGIN_2FA`); 2FA enrolment and removal (`ENABLE_2FA` / `DISABLE_2FA`); admin recovery reset (`RESET_2FA`).
+- Authentication: successful sign-in (`LOGIN`); successful sign-in completed with a 2FA code (`LOGIN_2FA`); failed sign-in attempts (`FAILED_LOGIN` — recorded with the submitted username and the reason: bad credentials or deactivated account; added 2026-10-13 with the sign-in throttle); 2FA enrolment and removal (`ENABLE_2FA` / `DISABLE_2FA`); admin recovery reset (`RESET_2FA`).
 - Users: user creation and update (role, terminal, active flag, whether the password changed).
 - Roles: role creation; role permission updates (with granted-permission count).
 - Agencies, carriers, terminals: creation and updates.
@@ -583,11 +590,11 @@ The system has **no push channels** (no SMS, no email, no browser notifications)
 - SIM transactions: issue, return, transfer, replacement, mark-lost flows with before/after assignment references.
 - Imports: driver and SIM import summaries with committed/total row counts.
 
-**Complete action catalogue — 33 actions** (verified 2026-10-09 by a full scan of every `logAudit()` call site, dynamic concatenations included, cross-checked against `SELECT DISTINCT action FROM audit_logs` — every action observed in the database maps to a code call site):
+**Complete action catalogue — 34 actions** (verified 2026-10-09 by a full scan of every `logAudit()` call site, dynamic concatenations included, cross-checked against `SELECT DISTINCT action FROM audit_logs` — every action observed in the database maps to a code call site; `FAILED_LOGIN` added 2026-10-13):
 
 | Module | Actions |
 |---|---|
-| Authentication | `LOGIN`, `LOGOUT`, `LOGIN_2FA`, `ENABLE_2FA`, `DISABLE_2FA`, `RESET_2FA` |
+| Authentication | `LOGIN`, `LOGOUT`, `LOGIN_2FA`, `FAILED_LOGIN`, `ENABLE_2FA`, `DISABLE_2FA`, `RESET_2FA` |
 | Users and roles | `CREATE_USER`, `UPDATE_USER`, `CREATE_ROLE`, `UPDATE_ROLE` |
 | Drivers and contacts | `CREATE_DRIVER`, `UPDATE_DRIVER`, `ADD_DRIVER_CONTACT`, `UPDATE_DRIVER_CONTACT`, `DELETE_DRIVER_CONTACT` |
 | SIM transactions | `ISSUE_SIM`, `RETURN_SIM`, `TRANSFER_SIM`, `REPLACE_SIM`, `MARK_LOST`, `MARK_DAMAGED`, `MARK_SUSPENDED`, `RETIRE_SIM` |
@@ -596,13 +603,15 @@ The system has **no push channels** (no SMS, no email, no browser notifications)
 
 Six actions are assembled dynamically at the call site: `IMPORT_DRIVERS`/`IMPORT_SIMS` by upload type; `RETURN_SIM` or `MARK_<status>` from `SimService::returnSim()` depending on the resulting SIM status; and `MARK_LOST`/`MARK_DAMAGED`/`MARK_SUSPENDED` from the Mark Lost flow by target status. All other actions are literal strings.
 
+**UPDATE_USER payload scope:** the `UPDATE_USER` event records role, terminal, active flag and whether the password changed. Per-permission allow/deny overrides are saved immediately before the event but are **not** itemized in the payload (likewise the profile password-change entry, whose payload is `field: password_hash`). Whether override changes *should* be itemized is an open product decision, not a system unknown.
+
 Blocked requests from disallowed countries (GeoIP guard) are **not** audit events — they occur before authentication and are written to the PHP error log instead (see [Country Access Restriction](#country-access-restriction-geoip)).
 
 **Who can view:** accounts holding `audit.view` (default: admin role only), via Administration → Audit Log.
 
 **Viewing and filtering:** date range (defaults to the last 14 days), action, user, terminal, free-text search over payload fields; pagination (50 per page); CSV/Excel export of the filtered range. Sorting by time, user, action, entity, terminal, IP, or payload.
 
-**Retention:** none configured — rows accumulate indefinitely. Purge/archival policy is **[TO VERIFY]** (no retention feature exists in the application).
+**Retention:** none configured — rows accumulate indefinitely. The application contains **no `DELETE`/`TRUNCATE`/purge path for `audit_logs`** (verified 2026-10-09 by full code scan; the only deletion lives in the development-only scenario-reset script, which is not part of the deployed application). Organizational retention rules, if any, are external.
 
 ---
 
@@ -618,7 +627,8 @@ Blocked requests from disallowed countries (GeoIP guard) are **not** audit event
 - **Imports:** malformed files, empty files, and upload errors are rejected before any write; the two-phase design prevents partial commits — only explicitly confirmed, classified-valid rows are inserted.
 - **Exports:** if the server lacks ZIP support, the Excel exporter falls back to CSV so exports never hard-fail.
 - **Table interactions:** if an AJAX table refresh fails, the application falls back to normal full-page navigation; client-side sorting skips empty-state rows and renumbers correctly.
-- **Deactivated accounts:** sign-in attempts with a deactivated account return a distinct message ("contact your administrator").
+- **Deactivated accounts:** sign-in attempts with a deactivated account return a distinct message ("contact your administrator"); the attempt is recorded as a `FAILED_LOGIN` audit event and counts toward the sign-in throttle.
+- **Database errors are never shown raw:** unexpected database or PHP errors are logged server-side and replaced with a generic message (`friendlyError()`); deliberately user-facing business-rule exceptions (`RuntimeException`) pass through unchanged. The web installer follows the same rule and refuses to re-run once an administrator account exists (its schema starts with `DROP TABLE`, so a re-run would erase live data).
 
 ---
 
@@ -708,16 +718,10 @@ The LMS driver profile carries a **"Sync from SIMLedger"** button in the Contact
 
 ---
 
-## Assumptions [TO VERIFY]
+## Open Verification Items
 
-The following items could not be fully confirmed from the running system and should be verified before this document is treated as authoritative. (Items previously listed here for phone-masking in exports, return-reason enforcement, and the `allow_multiple_sims_per_driver` setting have been **resolved**: exports now apply the screen's masking policy, the service layer validates the return date/reason/open state, and the multi-SIM runtime switch has been removed — the rule is enforced at both the service and database layers.) A verification round on **2026-10-09** (full code scan, live-database inspection, and mmdb metadata reads) then resolved or confirmed every item below; each is annotated with its method and what — if anything — remains open.
+Every internal assumption was verified during the verification rounds of **2026-10-09 / 2026-10-10** (full code scans, live-database inspection, mmdb metadata reads); the confirmed facts were folded into the relevant sections of this document (audit catalogue and payload scope, audit retention, re-activation paths, inactive master-data semantics, the App Settings table, and SIM-history pagination). The only items that remain are **external** checks that cannot be closed from the codebase or this environment:
 
-1. **Complete audit action catalogue — resolved (2026-10-09).** Enumerated by scanning every `logAudit()` call site in the application (including dynamically concatenated actions) and cross-checking against `SELECT DISTINCT action FROM audit_logs`: **33 actions**, now listed in [Audit and Logging](#audit-and-logging-current). Every action observed in the database maps to a code call site; no unexplained actions exist.
-2. **Permission-override audit granularity — verified as described.** Code check (`admin/users.php`): overrides are saved via `setUserPermissionOverrides()` immediately before `UPDATE_USER` is logged, and the audit payload contains only `role_id`, `terminal_id`, `active`, `password_changed` — override allow/deny decisions are **not** itemized (likewise the profile password-change `UPDATE_USER` entry, whose payload is `field: password_hash`). Whether override changes *should* be itemized is an open product decision, not a system unknown.
-3. **Re-activation of deactivated drivers/users — verified as described.** No restore/reactivate route, action string, or `SET is_active = 1` statement exists anywhere in the application code; re-activation happens only through the edit form's Active checkbox (`admin/drivers.php`, `admin/users.php`, and the reference-data edit forms). Whether that matches the intended offboarding policy remains an organizational decision.
-4. **Audit retention — verified as described.** The application contains no `DELETE`/`TRUNCATE`/purge path for `audit_logs`; the only deletion is the development-only scenario-reset script (`dev/cli-scenarios.php`), which is not part of the deployed application. Organizational retention rules, if any, remain external.
-5. **Setting catalogue — resolved (2026-10-09; refreshed 2026-10-10).** Full contents enumerated against the live database: 7 rows — `managers_see_full_numbers`, `mig_2fa`, `mig_status_rth_removed`, `perm_bootstrap_version` (all four read at runtime), plus `app_name` (seeded by the installer but never read; page titles use the `APP_NAME` constant), `allow_multiple_sims_per_driver` (an orphaned row from the removed switch), and `mig_status_returned_to_hr` (the orphaned flag from the removed `returned_to_hr` status). Documented as a table under [App Settings](#app-settings).
-6. **Inactive master-data semantics — verified by code inspection (2026-10-09).** Dropdown lookups default to `activeOnly = true` (`WHERE is_active = 1`, `includes/lookups.php`); CSV import builds its terminal/carrier/agency lookup maps from `is_active = 1` rows only, so an inactive master record makes the row fail as "unknown"; and export/report queries join master tables **without** active-flag predicates, so historical rows render the master name regardless of the record's current active flag. The conclusion is query-level — individual export edge cases were not all executed.
-7. **SIM history global feed cap — resolved.** The global SIM-history view is now **paginated** (25 rows per page, server-side sorted, `renderPagination()` confirmed on `sim-history.php`) with no row cap; the Excel export still returns every matching row, and the per-SIM chain-of-custody view/export shows the SIM's complete history.
-8. **reCAPTCHA keys and TOTP secret storage — code-verified 2026-10-09; two external bits remain open.** Verified: empty keys disable the captcha and localhost is always exempt (covered by probe-2fa, 60 checks); TOTP secrets are stored as plain base32 in `users.totp_secret` (schema + `totpGenerateSecret()`); and no backup-code code path exists anywhere in the application (zero matches). **Still open (external):** a live Google siteverify with real keys, and confirmation that the database's encryption-at-rest policy satisfies organizational requirements for the stored secrets.
-9. **GeoIP database vintage — resolved; one live observation open.** Bundled database metadata: `GeoLite2-Country`, build epoch **2026-10-07** (two days old at verification), IPv6-capable, 546,762 nodes. **Still open:** no request from a genuinely non-SA network was observed with the restriction enabled from this environment (all tests force the client IP via the `GEO_TEST_IP` hook); a single manual check — enable the flag, open the site through Tor or a foreign VPN, expect the 403 page — closes this item.
+1. **Live reCAPTCHA verification.** The keys-off path and the loopback exemption are code-verified and probe-covered (60 checks; the exemption is decided by `REMOTE_ADDR`, never the Host header). What remains is one live Google siteverify with real production keys.
+2. **TOTP secret storage policy.** Secrets are stored as plain base32 in `users.totp_secret` (schema + `totpGenerateSecret()`), and no backup-code code path exists anywhere in the application (zero matches). Confirmation that the database's encryption-at-rest policy satisfies organizational requirements for stored secrets is a deployment decision.
+3. **GeoIP guard live observation.** The bundled database (`GeoLite2-Country`, build epoch 2026-10-07 at verification, IPv6-capable, 546,762 nodes) and all guard logic are verified. What remains is a single live observation: enable the restriction and open the site from a genuinely non-SA network (Tor / foreign VPN), expecting the standalone 403 page. Tests from this environment force the client IP via the `GEO_TEST_IP` hook and therefore do not exercise a real foreign path.

@@ -66,7 +66,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: sims.php?status=' . $target);
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = friendlyError($e);
     }
 }
 

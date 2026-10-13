@@ -29,7 +29,9 @@ in a logistics/transport operation across multiple Saudi Arabian terminals.
    - seed terminals (**Dammam / Riyadh / Jeddah**), carriers (**STC / Mobily /
      Zain / Other**), roles and settings,
    - create the first administrator account.
-4. **Delete `install.php`** after installation.
+4. **Delete `install.php`** after installation. (The installer also refuses to
+   run again on its own once an administrator account exists — its schema
+   starts with `DROP TABLE`, so a re-run would erase live data.)
 5. Log in at `login.php`.
 
 Manual alternative: create the database with `mysql -u root -p < sql/schema.sql`,
@@ -178,6 +180,14 @@ repository.
 - Prepared statements everywhere (`PDO::ATTR_EMULATE_PREPARES = false`)
 - CSRF token on every POST (`csrfCheck()` / `csrfField()`)
 - `password_hash()` / `password_verify()` (bcrypt), never plaintext
+- Login brute-force throttle: per-username (5) and per-IP (20) failures lock
+  sign-in for the rest of a 15-minute window; every failure is audited
+  (`FAILED_LOGIN`); optional invisible reCAPTCHA on the login form
+- The installer refuses to run once an administrator account exists (its
+  schema starts with DROP TABLE, so a re-run would erase live data)
+- User-facing errors never expose SQL/DB details: business `RuntimeException`
+  messages pass through, everything else is logged server-side and replaced
+  with a generic text (`friendlyError()`)
 - Session hardening: HttpOnly, SameSite=Lax, Secure-on-HTTPS, ID regeneration
   at login, idle timeout, deactivate-takes-effect-next-request
 - Output escaping via `e()` on every interpolated value

@@ -96,13 +96,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             exit;
         }
     } catch (Throwable $e) {
-        $error = $e->getMessage();
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'A role with that key already exists.';
-        }
+        $error = friendlyError($e, 'A role with that key already exists.');
     }
 }
 

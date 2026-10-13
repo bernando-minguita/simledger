@@ -144,10 +144,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: drivers.php');
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'A driver with that badge number or Iqama number already exists.';
-        }
+        $error = friendlyError($e, 'A driver with that badge number or Iqama number already exists.');
     }
 }
 

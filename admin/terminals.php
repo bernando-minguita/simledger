@@ -55,10 +55,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: terminals.php');
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'A terminal with that name or code already exists.';
-        }
+        $error = friendlyError($e, 'A terminal with that name or code already exists.');
     }
 }
 

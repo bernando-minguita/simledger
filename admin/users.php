@@ -169,10 +169,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             exit;
         }
     } catch (Throwable $e) {
-        $error = $e->getMessage();
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'That username already exists.';
-        }
+        $error = friendlyError($e, 'That username already exists.');
     }
 }
 

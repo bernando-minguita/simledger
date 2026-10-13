@@ -91,7 +91,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             exit;
         }
     } catch (Throwable $e) {
-        $error   = $e->getMessage();
+        $error   = friendlyError($e);
         $confirm = null;
     }
 }

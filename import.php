@@ -349,7 +349,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        $error = $e->getMessage();
+        $error = friendlyError($e);
     }
 }
 

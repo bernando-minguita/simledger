@@ -39,3 +39,15 @@ define('RECAPTCHA_SECRET_KEY', '');
 
 // Seconds to wait for Google's siteverify response (fail-closed when exceeded).
 define('RECAPTCHA_TIMEOUT', 6);
+
+// ---------------------------------------------------------------------------
+// Login brute-force throttle (optional overrides - defaults shown)
+// ---------------------------------------------------------------------------
+// A sign-in is locked for the remainder of LOGIN_WINDOW_SECONDS once the
+// username has LOGIN_MAX_ATTEMPTS_USER failures, or the client IP has
+// LOGIN_MAX_ATTEMPTS_IP failures, inside that window. Failed attempts are
+// audited as FAILED_LOGIN. See includes/login-throttle.php.
+// define('LOGIN_MAX_ATTEMPTS_USER', 5);
+// define('LOGIN_MAX_ATTEMPTS_IP', 20);
+// define('LOGIN_WINDOW_SECONDS', 900);
+// define('LOGIN_ATTEMPT_RETENTION', 86400);

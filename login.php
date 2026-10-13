@@ -17,9 +17,11 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/audit.php';
 require_once __DIR__ . '/includes/recaptcha.php';
 require_once __DIR__ . '/includes/two-factor.php';
+require_once __DIR__ . '/includes/login-throttle.php';
 
 twoFactorBootstrap(); // login runs before any permission page can
 userAdminBootstrap(); // users.must_change_password (admin resets)
+loginThrottleBootstrap(); // login_attempts table on older databases
 
 // Already signed in? Go straight to the dashboard.
 if (!empty($_SESSION['user_id']) && refreshUser() !== null) {
@@ -135,12 +137,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         // ------------------------------------------- step 1: captcha + login
         $username = trim((string)($_POST['username'] ?? ''));
         $password = (string)($_POST['password'] ?? '');
+        $clientIp = loginClientIp();
 
         if ($username === '' || $password === '') {
             $error = 'Enter your username and password.';
         } elseif ($captchaOn
             && !recaptchaVerify((string)($_POST['g-recaptcha-response'] ?? ''))) {
             $error = 'Please confirm you are not a robot.';
+        } elseif (($lockWait = loginThrottleLockoutSeconds($username, $clientIp)) > 0) {
+            // Brute-force lock: no credential check, no extra failure recorded.
+            $error = 'Too many failed sign-in attempts. Please try again in '
+                . (int)ceil($lockWait / 60) . ' minute(s).';
         } else {
             $stmt = $GLOBALS['pdo']->prepare(
                 'SELECT u.id, u.username, u.password_hash, u.name, u.is_active,
@@ -155,11 +162,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             if ($row === false || !password_verify($password, $row['password_hash'])) {
                 $error = 'Invalid username or password.';
+                loginThrottleRecordFailure($username, $clientIp);
+                logAudit('FAILED_LOGIN', 'user', null,
+                    null, ['username' => $username, 'reason' => 'bad_credentials'],
+                    null, mb_substr($username, 0, 50));
             } elseif ((int)$row['is_active'] !== 1) {
                 $error = 'This account has been deactivated. Contact your administrator.';
+                loginThrottleRecordFailure($username, $clientIp);
+                logAudit('FAILED_LOGIN', 'user', (int)$row['id'],
+                    null, ['username' => $username, 'reason' => 'deactivated'],
+                    null, mb_substr($username, 0, 50));
             } elseif ((int)$row['totp_enabled'] === 1 && $row['totp_secret'] !== null) {
                 // Password valid: challenge for the 2FA code BEFORE opening
                 // the authenticated session.
+                loginThrottleClear($username);   // correct password = legitimate user
                 session_regenerate_id(true);
                 unset($_SESSION['csrf_token']);
                 $_SESSION['2fa_pending'] = (int)$row['id'];
@@ -167,6 +183,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $_SESSION['2fa_tries']   = 0;
                 $totpPending = true;
             } else {
+                loginThrottleClear($username);
                 $finish($row, false);
             }
         }

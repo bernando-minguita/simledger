@@ -53,10 +53,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: agencies.php');
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
-        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
-            $error = 'An agency with that name or code already exists.';
-        }
+        $error = friendlyError($e, 'An agency with that name or code already exists.');
     }
 }
 

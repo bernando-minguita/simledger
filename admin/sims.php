@@ -131,11 +131,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: sims.php');
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
         if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
+            // Distinguish the two unique keys by the raw message (logged too).
+            error_log('[simledger] database error: ' . $e->getMessage());
             $error = strpos((string)$e->getMessage(), 'normalized_mobile') !== false
                 ? 'This mobile number already exists in the SIM inventory.'
                 : 'This ICCID already exists in the SIM inventory.';
+        } else {
+            $error = friendlyError($e);
         }
     }
 }

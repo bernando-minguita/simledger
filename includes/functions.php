@@ -14,6 +14,43 @@ function e($value): string
 }
 
 /**
+ * Turn a caught Throwable into a safe, user-facing message (M1: never leak
+ * SQL / schema details to the browser).
+ *
+ * - RuntimeException messages in this application are written for end users
+ *   ("This driver is not eligible for assignment...") and pass through as-is.
+ *   (PDOException extends RuntimeException, so it is checked FIRST.)
+ * - PDOException: logged server-side; unique-key violations (SQLSTATE 23000)
+ *   map to the page's $duplicateMessage, everything else to a generic text.
+ * - Any other unexpected error: logged server-side + generic text.
+ */
+function friendlyError(\Throwable $e, string $duplicateMessage = 'A record with the same unique value already exists.'): string
+{
+    if ($e instanceof PDOException) {
+        // Log the real reason server-side only - never print it.
+        error_log('[simledger] database error: ' . $e->getMessage());
+
+        if ((string)$e->getCode() === '23000') {
+            return $duplicateMessage;
+        }
+
+        return 'The operation could not be completed because of a database error. '
+            . 'The technical details were written to the PHP error log. '
+            . 'Please try again or contact your administrator.';
+    }
+
+    if ($e instanceof RuntimeException) {
+        return $e->getMessage();
+    }
+
+    error_log('[simledger] ' . get_class($e) . ': ' . $e->getMessage()
+        . ' @ ' . $e->getFile() . ':' . $e->getLine());
+
+    return 'The operation could not be completed. The technical details were '
+        . 'written to the PHP error log. Please try again or contact your administrator.';
+}
+
+/**
  * One-shot session flash message.
  */
 function setFlash(string $type, string $message): void

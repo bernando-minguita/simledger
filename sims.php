@@ -168,7 +168,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         header('Location: sims.php?' . filtersUrl());
         exit;
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = friendlyError($e);
     }
 }
 

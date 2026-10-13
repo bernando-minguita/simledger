@@ -3,8 +3,8 @@
  * reCAPTCHA v2 (invisible) helpers for the sign-in form.
  *
  * The captcha is enforced only when keys are configured in config/config.php
- * AND the host is not localhost - Google rejects localhost site keys, so the
- * check is skipped automatically during local development.
+ * AND the client is not on a loopback address - Google rejects localhost site
+ * keys, so the check is skipped automatically during local development.
  */
 
 declare(strict_types=1);
@@ -17,32 +17,47 @@ defined('RECAPTCHA_SECRET_KEY') || define('RECAPTCHA_SECRET_KEY', '');
 defined('RECAPTCHA_TIMEOUT')    || define('RECAPTCHA_TIMEOUT', 6);
 
 /**
- * True for local development hosts (any port, incl. IPv6 loopback).
+ * True when the request comes from a loopback address (127.0.0.0/8 or ::1) -
+ * the local-development situation where Google rejects site keys anyway.
+ *
+ * The decision is based on REMOTE_ADDR only, NEVER on the Host header: the
+ * Host header is client-controlled, so trusting it would let an attacker send
+ * "Host: localhost" against a default vhost and skip the captcha entirely.
  */
-function recaptchaIsLocalHost(?string $host = null): bool
+function recaptchaIsLocalHost(?string $ip = null): bool
 {
-    $h = strtolower((string)($host ?? ($_SERVER['HTTP_HOST'] ?? '')));
-    $h = trim($h);
+    $ip = $ip !== null ? trim($ip) : trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
 
-    if (str_starts_with($h, '[')) {           // [::1]:8097
-        $h = (string)explode(']', substr($h, 1))[0];
-    } else {
-        $h = (string)explode(':', $h)[0];     // localhost:8097
+    if ($ip === '') {
+        return false;
     }
 
-    return in_array($h, ['localhost', '127.0.0.1', '::1'], true);
+    // Same loopback test as includes/geo-guard.php when it is loaded.
+    if (function_exists('geoIsLoopback')) {
+        return geoIsLoopback($ip);
+    }
+
+    $bin = @inet_pton($ip);
+    if ($bin === false) {
+        return false;
+    }
+    if (strlen($bin) === 4) {
+        return $bin[0] === "\x7f";               // 127.0.0.0/8
+    }
+
+    return $bin === str_repeat("\x00", 15) . "\x01";   // ::1
 }
 
 /**
- * Captcha active only when both keys are set and we are not on localhost.
+ * Captcha active only when both keys are set and the client is not loopback.
  */
-function recaptchaEnabled(?string $host = null): bool
+function recaptchaEnabled(?string $ip = null): bool
 {
     if (RECAPTCHA_SITE_KEY === '' || RECAPTCHA_SECRET_KEY === '') {
         return false;
     }
 
-    return !recaptchaIsLocalHost($host);
+    return !recaptchaIsLocalHost($ip);
 }
 
 /**

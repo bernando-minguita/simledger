@@ -19,12 +19,40 @@ $adminUser = trim((string)($_POST['admin_user'] ?? 'admin'));
 $adminPass = (string)($_POST['admin_pass'] ?? '');
 $adminName = trim((string)($_POST['admin_name'] ?? 'System Administrator'));
 
+// ---------------------------------------------------------------------------
+// Already-installed guard. sql/schema.sql starts with DROP TABLE statements,
+// so a re-run would ERASE the live database. Refuse once an administrator
+// account exists; the only way to reinstall is dropping the database manually
+// first (documented in the refusal message). Best-effort probe: when the
+// database cannot be reached yet, a fresh install can proceed.
+// ---------------------------------------------------------------------------
+$alreadyInstalled = false;
+try {
+    $probe = new PDO(
+        'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+        DB_USER,
+        DB_PASS,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+    );
+    $alreadyInstalled = (int)$probe->query('SELECT COUNT(*) FROM users')->fetchColumn() > 0;
+    unset($probe);
+} catch (PDOException $e) {
+    $alreadyInstalled = false;
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    if ($adminUser === '' || strlen($adminUser) > 50) {
-        $errors[] = 'Administrator username is required (max 50 characters).';
-    }
-    if (strlen($adminPass) < 8) {
-        $errors[] = 'Administrator password must be at least 8 characters.';
+    if ($alreadyInstalled) {
+        $errors[] = 'SIMLedger is already installed. Re-running the installer would '
+            . 'erase all data, so it was blocked. If you really intend to reinstall, '
+            . 'drop the database "' . DB_NAME . '" manually first, then run this '
+            . 'installer again. Otherwise delete install.php now.';
+    } else {
+        if ($adminUser === '' || strlen($adminUser) > 50) {
+            $errors[] = 'Administrator username is required (max 50 characters).';
+        }
+        if (strlen($adminPass) < 8) {
+            $errors[] = 'Administrator password must be at least 8 characters.';
+        }
     }
 
     if ($errors === []) {
@@ -86,8 +114,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             $done = true;
         } catch (Throwable $e) {
+            // Log the real reason server-side only - never print SQL/DSN
+            // details (they can name databases, users and drivers).
             error_log('[simledger] install failed: ' . $e->getMessage());
-            $errors[] = 'Installation failed: ' . $e->getMessage();
+            $errors[] = 'Installation failed. The technical details were written '
+                . 'to the PHP error log. Check the database credentials in '
+                . 'config/config.php and that the MySQL service is running.';
         }
     }
 }
@@ -118,6 +150,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         </div>
         <a class="btn btn-primary w-100" href="login.php">Go to Login</a>
         <p class="login-sub mt-3 mb-0">For safety, delete <code>install.php</code> now.</p>
+    <?php elseif ($alreadyInstalled): ?>
+        <div class="alert-error mb-3">
+            <strong>Already installed.</strong> This database already contains a
+            SIMLedger administrator account, so the installer will not run again
+            (it would erase all data). Delete <code>install.php</code> now.
+        </div>
+        <a class="btn btn-primary w-100" href="login.php">Go to Login</a>
     <?php else: ?>
         <?php foreach ($errors as $err): ?>
             <p class="login-error"><?= e($err) ?></p>
