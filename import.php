@@ -19,8 +19,14 @@ $type    = (string)($_GET['type'] ?? $_POST['type'] ?? 'drivers');
 $confirm = ($_POST['confirm'] ?? '') === '1';
 $error   = '';
 
-if (!in_array($type, ['drivers', 'sims'], true)) {
+if (!in_array($type, ['drivers', 'sims', 'drivers-update'], true)) {
     $type = 'drivers';
+}
+
+// Bulk-updating the driver master is admin-only: on top of data.import it also
+// requires the Driver Management permission (driver.manage).
+if ($type === 'drivers-update') {
+    requirePermission('driver.manage');
 }
 
 /**
@@ -95,6 +101,14 @@ function classifyRows(string $type, array $rows, PDO $pdo): array
         $agencies[strtolower($a['code'])] = (int)$a['id'];
     }
 
+    // Driver statuses are accepted as either the stored key ("resigned") or the
+    // exported label ("Resigned"), so an export can be re-imported unchanged.
+    $statusKeys = [];
+    foreach (driverStatusOptions() as $skey => $slabel) {
+        $statusKeys[strtolower($skey)]   = $skey;
+        $statusKeys[strtolower($slabel)] = $skey;
+    }
+
     $out = [];
 
     foreach ($rows as $row) {
@@ -166,6 +180,153 @@ function classifyRows(string $type, array $rows, PDO $pdo): array
                 'agency_id' => $agencyId, 'iqama' => $iqama, 'nationality' => $nat,
                 'status' => $stat, 'phone' => $phone, 'phone_norm' => $phoneNorm,
             ];
+        } elseif ($type === 'drivers-update') {
+            // Bulk update of the driver master, matched on badge number. Only
+            // columns carrying a value are applied - a blank cell leaves the
+            // stored value untouched, so editing just the Status column of an
+            // export is safe. "Current SIM" / "SIM Status" / "SIM Issued" are
+            // context columns and are deliberately ignored: issuing, returning
+            // and transferring SIMs stays in the audited transaction pages
+            // because driver_sim_assignments is append-only history.
+            $badge = trim((string)($row['badge number'] ?? $row['badge_number'] ?? $row['badge'] ?? ''));
+
+            if ($badge === '') {
+                $errors[] = 'badge number is required';
+            }
+
+            $current = null;
+            if ($badge !== '') {
+                $find = $pdo->prepare('SELECT * FROM drivers WHERE badge_number = ?');
+                $find->execute([$badge]);
+                $current = $find->fetch() ?: null;
+                if ($current === null) {
+                    $errors[] = 'no driver with badge: ' . $badge;
+                }
+            }
+
+            $changes = [];
+
+            if ($current !== null) {
+                $name = trim((string)($row['driver name'] ?? $row['name'] ?? ''));
+                if ($name !== '') {
+                    if (strlen($name) > 120) {
+                        $errors[] = 'driver name too long (max 120 chars)';
+                    } else {
+                        $changes['name'] = $name;
+                    }
+                }
+
+                $term = trim((string)($row['terminal'] ?? ''));
+                if ($term !== '') {
+                    $termId = $terminals[strtolower($term)] ?? 0;
+                    if ($termId === 0) {
+                        $errors[] = 'unknown terminal: ' . $term;
+                    } else {
+                        $changes['terminal_id'] = $termId;
+                    }
+                }
+
+                $agency = trim((string)($row['agency'] ?? $row['agency name'] ?? $row['agency_name'] ?? ''));
+                if ($agency !== '') {
+                    $agencyId = $agencies[strtolower($agency)] ?? 0;
+                    if ($agencyId === 0) {
+                        $errors[] = 'unknown agency: ' . $agency;
+                    } else {
+                        $changes['agency_id'] = $agencyId;
+                    }
+                }
+
+                $stat = strtolower(trim((string)($row['status'] ?? '')));
+                if ($stat !== '') {
+                    $statKey = $statusKeys[$stat] ?? null;
+                    if ($statKey === null) {
+                        $errors[] = 'unknown status: ' . trim((string)($row['status'] ?? ''));
+                    } else {
+                        $changes['status'] = $statKey;
+                    }
+                }
+
+                $iqama = trim((string)($row['iqama'] ?? $row['iqama number'] ?? $row['iqama_number'] ?? ''));
+                if ($iqama !== '' && $iqama !== (string)($current['iqama_number'] ?? '')) {
+                    if (strlen($iqama) > 20) {
+                        $errors[] = 'iqama number too long (max 20 chars)';
+                    } else {
+                        // Uniqueness is schema-enforced; surface it in the preview
+                        // rather than failing the whole commit.
+                        $dupI = $pdo->prepare(
+                            'SELECT id FROM drivers WHERE iqama_number = ? AND id <> ?'
+                        );
+                        $dupI->execute([$iqama, (int)$current['id']]);
+                        if ($dupI->fetch() !== false) {
+                            $errors[] = 'iqama already used by another driver: ' . $iqama;
+                        } else {
+                            $changes['iqama_number'] = $iqama;
+                        }
+                    }
+                }
+
+                $nat = trim((string)($row['nationality'] ?? ''));
+                if ($nat !== '') {
+                    if (strlen($nat) > 60) {
+                        $errors[] = 'nationality too long (max 60 chars)';
+                    } else {
+                        $changes['nationality'] = $nat;
+                    }
+                }
+
+                $ext = trim((string)($row['external driver id'] ?? $row['external_driver_id'] ?? ''));
+                if ($ext !== '') {
+                    if (strlen($ext) > 60) {
+                        $errors[] = 'external driver ID too long (max 60 chars)';
+                    } else {
+                        $changes['external_driver_id'] = $ext;
+                    }
+                }
+
+                $notes = trim((string)($row['notes'] ?? ''));
+                if ($notes !== '') {
+                    if (strlen($notes) > 255) {
+                        $errors[] = 'notes too long (max 255 chars)';
+                    } else {
+                        $changes['notes'] = $notes;
+                    }
+                }
+
+                $act = strtolower(trim((string)($row['active'] ?? '')));
+                if ($act !== '') {
+                    if (in_array($act, ['yes', 'y', '1', 'true'], true)) {
+                        $changes['is_active'] = 1;
+                    } elseif (in_array($act, ['no', 'n', '0', 'false'], true)) {
+                        $changes['is_active'] = 0;
+                    } else {
+                        $errors[] = 'active must be Yes or No: ' . trim((string)($row['active'] ?? ''));
+                    }
+                }
+
+                // Offboarding safeguard (same rule as Driver Management): a driver
+                // who still holds a company SIM cannot be deactivated in bulk -
+                // return or transfer the SIM, or deactivate there with a reason.
+                if (($changes['is_active'] ?? null) === 0) {
+                    $hold = $pdo->prepare(
+                        'SELECT s.mobile_number FROM driver_sim_assignments a
+                           JOIN company_sims s ON s.id = a.sim_id
+                          WHERE a.driver_id = ? AND a.returned_at IS NULL LIMIT 1'
+                    );
+                    $hold->execute([(int)$current['id']]);
+                    $held = $hold->fetch();
+                    if ($held !== false) {
+                        $errors[] = 'still holds SIM ' . $held['mobile_number']
+                            . ' - return or transfer it first, or deactivate in'
+                            . ' Driver Management with a recorded reason';
+                        unset($changes['is_active']);
+                    }
+                }
+
+                if ($changes === [] && $errors === []) {
+                    $errors[] = 'nothing to update - every updatable column is blank';
+                }
+            }
+            $norm = ['badge' => $badge, 'changes' => $changes];
         } else {
             $number  = trim((string)($row['sim number'] ?? $row['mobile_number'] ?? $row['sim'] ?? ''));
             $iccid   = trim((string)($row['iccid'] ?? ''));
@@ -230,9 +391,9 @@ function classifyRows(string $type, array $rows, PDO $pdo): array
     // In-file duplicates.
     $seen = [];
     foreach ($out as $k => $rec) {
-        $key = $type === 'drivers'
-            ? ($rec['_data']['badge'] ?? '')
-            : ($rec['_data']['norm'] ?? '');
+        $key = $type === 'sims'
+            ? ($rec['_data']['norm'] ?? '')
+            : ($rec['_data']['badge'] ?? '');
         if ($key !== '' && isset($seen[$key])) {
             $out[$k]['_state'] = 'invalid';
             $out[$k]['_errors'][] = 'duplicate row within the file';
@@ -307,6 +468,60 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                         }
                     }
                 }
+            } elseif ($type === 'drivers-update') {
+                // Whitelist of columns a bulk update may write - CSV header names
+                // never reach the SQL, only these validated column names do.
+                $allowed = ['name', 'terminal_id', 'agency_id', 'status', 'iqama_number',
+                            'nationality', 'external_driver_id', 'notes', 'is_active'];
+                $find = $pdo->prepare('SELECT * FROM drivers WHERE badge_number = ?');
+
+                foreach ($valid as $rec) {
+                    $badge   = (string)$rec['_data']['badge'];
+                    $changes = $rec['_data']['changes'];
+
+                    if ($changes === []) {
+                        continue;
+                    }
+
+                    $find->execute([$badge]);
+                    $before = $find->fetch();
+                    if ($before === false) {
+                        continue;   // driver vanished between preview and confirm
+                    }
+
+                    $set  = [];
+                    $vals = [];
+                    foreach ($changes as $col => $val) {
+                        if (!in_array($col, $allowed, true)) {
+                            continue;
+                        }
+                        $set[]  = $col . ' = ?';
+                        $vals[] = $val;
+                    }
+                    if ($set === []) {
+                        continue;
+                    }
+                    $vals[] = (int)$before['id'];
+
+                    $upd = $pdo->prepare(
+                        'UPDATE drivers SET ' . implode(', ', $set) . ' WHERE id = ?'
+                    );
+                    $upd->execute($vals);
+
+                    // rowCount() counts rows actually changed, so a no-op row is
+                    // neither counted nor audited.
+                    if ((int)$upd->rowCount() > 0) {
+                        $committed++;
+                        $old = [];
+                        foreach (array_keys($changes) as $col) {
+                            if (in_array($col, $allowed, true)) {
+                                $old[$col] = $before[$col] ?? null;
+                            }
+                        }
+                        logAudit('UPDATE_DRIVER', 'driver', (int)$before['id'], $old,
+                            $changes + ['source' => 'csv_bulk_update']);
+                    }
+                }
             } else {
                 $ins = $pdo->prepare(
                     'INSERT IGNORE INTO company_sims
@@ -334,8 +549,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             $pdo->commit();
 
-            logAudit($type === 'drivers' ? 'IMPORT_DRIVERS' : 'IMPORT_SIMS',
-                $type, null, null,
+            $summaryAction = [
+                'drivers'        => 'IMPORT_DRIVERS',
+                'drivers-update' => 'IMPORT_DRIVERS_UPDATE',
+            ][$type] ?? 'IMPORT_SIMS';
+            logAudit($summaryAction, $type, null, null,
                 ['committed' => $committed, 'total' => count($classified)]);
 
             setFlash('ok', sprintf(
@@ -385,12 +603,26 @@ $invalidCount = $classified !== null ? count($classified) - $validCount : 0;
                     <a class="nav-link<?= $type === 'sims' ? ' active' : '' ?>"
                        href="import.php?type=sims">SIM import</a>
                 </li>
+                <?php if (can('driver.manage')): ?>
+                    <li class="nav-item">
+                        <a class="nav-link<?= $type === 'drivers-update' ? ' active' : '' ?>"
+                           href="import.php?type=drivers-update">Driver bulk update</a>
+                    </li>
+                <?php endif; ?>
             </ul>
 
             <p class="small text-muted mb-2">
                 <?php if ($type === 'drivers'): ?>
                     Expected headers: <code>Badge Number, Driver Name, Terminal, Status, Personal Mobile,
                     Agency, Iqama, Nationality</code> (Agency/Iqama/Nationality optional)
+                <?php elseif ($type === 'drivers-update'): ?>
+                    Expected headers: <code>Badge Number, Driver Name, Terminal, Agency, Iqama Number,
+                    Nationality, Status, Active, External Driver ID, Notes</code> &mdash; the columns the
+                    Driver Management <em>Export Excel</em> button produces.
+                    <strong>Badge Number</strong> selects the driver and is required; every other column is
+                    optional and a <strong>blank cell leaves the stored value unchanged</strong>, so editing
+                    only the Status column is safe. Current SIM / SIM Status / SIM Issued are ignored:
+                    issuing, returning and transferring SIMs stays in the audited transaction pages.
                 <?php else: ?>
                     Expected headers: <code>SIM Number, ICCID, Carrier, Terminal, Status</code>
                 <?php endif; ?>
