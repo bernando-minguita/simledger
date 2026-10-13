@@ -190,8 +190,8 @@ $initials  = strtoupper(substr($nameParts[0] ?? 'U', 0, 1)
     <title><?= e($pageTitle) ?> &middot; <?= e(APP_NAME) ?></title>
     <link rel="icon" href="<?= e($base) ?>assets/img/favicon.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="<?= e($base) ?>assets/img/favicon.ico">
-    <link rel="stylesheet" href="<?= e($base) ?>assets/css/bootstrap.min.css">
-    <link rel="stylesheet" href="<?= e($base) ?>assets/css/style.css">
+    <link rel="stylesheet" href="<?= e($base . asset('assets/css/bootstrap.min.css')) ?>">
+    <link rel="stylesheet" href="<?= e($base . asset('assets/css/style.css')) ?>">
 </head>
 <body>
 

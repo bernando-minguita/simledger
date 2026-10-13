@@ -14,6 +14,23 @@ function e($value): string
 }
 
 /**
+ * Cache-busting URL for a static asset.
+ *
+ * Appends ?v=<mtime> so a deployed JS/CSS change is fetched immediately.
+ * Apache sends Last-Modified/ETag for static files, and browsers then treat
+ * them as fresh for a heuristic period - without this a fixed
+ * table-toolkit.js can keep running from cache long after deployment, which
+ * looks exactly like "the fix did not work".
+ */
+function asset(string $rel): string
+{
+    $rel = ltrim($rel, '/');
+    $abs = dirname(__DIR__) . '/' . $rel;
+
+    return $rel . '?v=' . (is_file($abs) ? (string)filemtime($abs) : '1');
+}
+
+/**
  * Turn a caught Throwable into a safe, user-facing message (M1: never leak
  * SQL / schema details to the browser).
  *

@@ -15,10 +15,10 @@ declare(strict_types=1);
 
 <div class="sidebar-backdrop" data-sidebar-close></div>
 
-<script src="<?= e($base ?? '') ?>assets/js/bootstrap.bundle.min.js"></script>
-<script src="<?= e($base ?? '') ?>assets/js/table-toolkit.js"></script>
-<script src="<?= e($base ?? '') ?>assets/js/picker.js"></script>
-<script src="<?= e($base ?? '') ?>assets/js/shared.js"></script>
+<script src="<?= e(($base ?? '') . asset('assets/js/bootstrap.bundle.min.js')) ?>"></script>
+<script src="<?= e(($base ?? '') . asset('assets/js/table-toolkit.js')) ?>"></script>
+<script src="<?= e(($base ?? '') . asset('assets/js/picker.js')) ?>"></script>
+<script src="<?= e(($base ?? '') . asset('assets/js/shared.js')) ?>"></script>
 <script>
 /* Sidebar toggle: off-canvas below 992px, always visible on desktop.
    Tapping the backdrop or any nav link closes the drawer again. */

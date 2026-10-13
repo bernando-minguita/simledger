@@ -239,8 +239,11 @@
         return ok;
     }
 
-    function loadPartial(url, region) {
-        if (!region) { window.location.href = url; return; }
+    function loadPartial(url, region, soft) {
+        if (!region) {
+            if (!soft) { window.location.href = url; }
+            return;
+        }
         region.classList.add('tt-loading');
         fetch(url, {
             credentials: 'same-origin',
@@ -250,11 +253,22 @@
             .then(function (html) {
                 var doc = new DOMParser().parseFromString(html, 'text/html');
                 region.classList.remove('tt-loading');
-                if (!swapRegions(doc, [region])) { window.location.href = url; return; }
+                if (!swapRegions(doc, [region])) {
+                    if (!soft) { window.location.href = url; }
+                    return;
+                }
                 syncFilterForms(doc);
                 initAll();
             })
-            .catch(function () { window.location.href = url; });
+            .catch(function () {
+                region.classList.remove('tt-loading');
+                // "soft" callers (the remembered-sort restore, which fires on
+                // page load) must NEVER navigate: a failed fetch used to fall
+                // back to window.location.href and reload the whole page a
+                // second time - sidebar and all. Degrade to the server's
+                // default order instead.
+                if (!soft) { window.location.href = url; }
+            });
     }
 
     function filterForms() {
@@ -362,13 +376,20 @@
                 markSort(table, indexOfServerSort(urlSort), urlDir);
             } else if (stored && stored[0]) {
                 // Restore the last-used sort via URL (shareable + persisted).
+                // The table's own region MUST be passed: without it loadPartial()
+                // has no target to swap and falls back to window.location.href,
+                // so every visit to a previously-sorted list navigated a SECOND
+                // time (the whole page - sidebar included - rendered twice).
+                // The trailing true = "soft": this runs on page load, so even a
+                // failed fetch must not navigate - it just keeps the server's
+                // default order.
                 var sp = new URLSearchParams(location.search);
                 sp.set('sort', stored[0]);
                 sp.set('dir', stored[1] === 'desc' ? 'desc' : 'asc');
                 sp.delete('page');
                 var target = location.pathname + '?' + sp.toString();
                 history.replaceState({ tt: 1 }, '', target);
-                loadPartial(target);
+                loadPartial(target, partialOf(table), true);
             }
         } else if (urlSort) {
             var ci = indexOfSlugSort(urlSort);
@@ -428,7 +449,17 @@
     }
 
     // ------------------------------------------------------------- bootstrap
-    document.addEventListener('DOMContentLoaded', function () {
+    // Runs IMMEDIATELY - deliberately NOT on DOMContentLoaded.
+    //
+    // This script sits at the end of <body>, so every table is already parsed
+    // here. Initialising now inserts the "#" row-number column BEFORE the
+    // browser's first paint. Waiting for DOMContentLoaded let the browser paint
+    // the tables first and the column landed a frame later, so every column
+    // visibly jumped to the right (the reported "column flicker").
+    //
+    // initAll() is idempotent - initTable() skips any table already carrying
+    // data-tt-init - so the partial-refresh path below can keep calling it.
+    (function boot() {
         // ---- filter submits refresh only the form's target region --------
         Array.prototype.forEach.call(filterForms(), function (form) {
             form.addEventListener('submit', function (e) {
@@ -491,5 +522,5 @@
         });
 
         initAll();
-    });
+    })();
 })();
