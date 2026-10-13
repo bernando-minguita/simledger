@@ -184,7 +184,7 @@ require __DIR__ . '/../includes/header.php';
             }
             ?>
             <?php if ($breakdown !== []): ?>
-                <tr class="fw-bold border-top">
+                <tr class="fw-bold border-top" data-tt-total="1">
                     <td>All terminals</td>
                     <td><?= $bTotals['total'] ?></td>
                     <td><?= $bTotals['available'] ?></td>

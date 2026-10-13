@@ -66,6 +66,15 @@ of your choice). Additional roles (manager, dispatcher, …) are managed from
 - **Agencies:** drivers are sourced from outsourcing providers (SMASCO, SRACO,
   TAMKEEN) in addition to RT (own company); filterable and exported everywhere.
 
+### UI shell
+
+- The fixed sidebar is its own scroll container (`position: fixed` +
+  `overflow-y: auto`), so browsers reset it to the top on every navigation.
+  `assets/js/shared.js` remembers the offset in `sessionStorage` (per tab, so
+  two tabs parked on different sections never fight over one shared value) and
+  re-applies it on load — a long nav list keeps its place across clicks. It is a
+  no-op on pages without a sidebar (e.g. login).
+
 ## Architecture
 
 ```
@@ -174,6 +183,15 @@ repository.
 - Server-side sortable tables declare `data-sort` on their `<th>` elements,
   `data-tt-sort="server"` on the `<table>`, an optional `data-offset` for row
   numbering, and keep their column allow-lists in the page's `$sortMap`.
+- A summary row (e.g. **All terminals** in the SIM Inventory breakdown) is
+  marked `data-tt-total="1"` on its `<tr>`: the toolkit never sorts it into the
+  data rows, never gives it a row number, and always keeps it pinned at the
+  bottom of the table body.
+- Click-to-select tables (Issue, Transfer, Replace, Return, Mark Lost) carry the
+  `picker-table` class: it gives every picker the same compact row height and
+  the same `.row-selected` highlight. Keep it on any new picker table — without
+  it the picker falls back to the roomy data-table row padding and no longer
+  matches the picker beside it.
 
 ## Security checklist
 

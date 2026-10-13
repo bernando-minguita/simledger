@@ -186,3 +186,54 @@
         }).catch(function () { /* cancelled - stay on the page */ });
     });
 })();
+
+/* --------------------------------------------------------- sidebar scroll ---
+ * The sidebar is its own scroll container (position: fixed + overflow-y:
+ * auto), and browsers reset nested scrollers to the top on every navigation -
+ * so an admin with a long nav list had to re-scroll after each click.
+ *
+ * The offset is kept in sessionStorage: it is per tab, so two tabs parked on
+ * different sections never fight over one shared value, and it dies with the
+ * tab, so a stale offset can never outlive the nav it was measured against.
+ * (Bootstrap sets scroll-behavior:smooth on :root, but that property is not
+ * inherited, so the assignment below restores instantly.)
+ */
+(function () {
+    'use strict';
+
+    var KEY = 'simledger:sidebar:scroll';
+    var sidebar = document.getElementById('appSidebar');
+    if (!sidebar) { return; }
+
+    var userScrolled = false;
+
+    function store(y) {
+        try { sessionStorage.setItem(KEY, String(y)); } catch (e) { /* private mode */ }
+    }
+
+    function restore() {
+        if (userScrolled) { return; }          // the user owns the position now
+        var raw;
+        try { raw = sessionStorage.getItem(KEY); } catch (e) { return; }
+        var y = raw === null ? 0 : parseInt(raw, 10);
+        if (y > 0) { sidebar.scrollTop = y; }  // clamps itself if the nav shrank
+    }
+
+    // shared.js runs at the end of <body>, so the nav markup is already parsed.
+    restore();
+    // Re-apply once images/fonts have finished reflowing the nav - skipped if
+    // the user has taken over the position in the meantime.
+    window.addEventListener('load', restore);
+
+    sidebar.addEventListener('scroll', function () {
+        userScrolled = true;
+        store(sidebar.scrollTop);
+    }, { passive: true });
+
+    // Safety nets: the click that starts the navigation, and the page-hide some
+    // browsers use instead of beforeunload.
+    sidebar.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('a')) { store(sidebar.scrollTop); }
+    });
+    window.addEventListener('pagehide', function () { store(sidebar.scrollTop); });
+})();

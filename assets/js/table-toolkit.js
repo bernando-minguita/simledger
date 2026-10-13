@@ -8,6 +8,8 @@
  *     (?sort=<key>&dir= in the URL - shareable/bookmarkable, restored from
  *     localStorage when the URL has no sort), client-side DOM sorting on all
  *     other tables; the preference persists across sessions
+ *   - rows marked data-tt-total are TOTALS rows: never sorted, never row
+ *     numbered, and always pinned to the bottom of the body
  *   - filter submits and pagination links refresh only their table REGION
  *     (fetch + history API): any container marked data-tt-partial, plus the
  *     legacy #table-partial id; forms declare data-tt-target / data-tt-page
@@ -36,6 +38,13 @@
         return tr.cells.length === 1 && tr.cells[0].hasAttribute('colspan');
     }
 
+    // A totals row ("All terminals", grand totals, ...) is a summary of the
+    // rows above it, not data: it must never be sorted into them, and it does
+    // not take a row number.
+    function isTotalRow(tr) {
+        return tr.hasAttribute('data-tt-total');
+    }
+
     // ------------------------------------------------------------- row numbers
     function renumber(table) {
         var body = table.tBodies[0];
@@ -43,7 +52,7 @@
         var offset = parseInt(table.getAttribute('data-offset') || '0', 10) || 0;
         var n = offset;
         Array.prototype.forEach.call(body.rows, function (tr) {
-            if (isEmptyRow(tr)) { return; }
+            if (isEmptyRow(tr) || isTotalRow(tr)) { return; }
             var first = tr.cells[0];
             if (first && first.classList.contains('tt-num')) {
                 first.textContent = String(++n);
@@ -73,7 +82,9 @@
             }
             var td = document.createElement('td');
             td.className = 'tt-num';
-            td.textContent = String(++n);
+            // The cell is still added to a totals row so its columns stay
+            // aligned with the data rows - it is just left unnumbered.
+            td.textContent = isTotalRow(tr) ? '' : String(++n);
             tr.insertBefore(td, tr.firstChild);
         });
     }
@@ -155,8 +166,11 @@
         if (!body) { return; }
         var rows = [];
         var emptyRow = null;
+        var totalRows = [];
         Array.prototype.forEach.call(body.rows, function (tr) {
-            if (isEmptyRow(tr)) { emptyRow = tr; } else { rows.push(tr); }
+            if (isEmptyRow(tr)) { emptyRow = tr; }
+            else if (isTotalRow(tr)) { totalRows.push(tr); }
+            else { rows.push(tr); }
         });
         rows.forEach(function (tr, i) { tr.setAttribute('data-tt-idx', String(i)); });
         rows.sort(function (a, b) {
@@ -176,6 +190,8 @@
             return dir === 'desc' ? -r : r;
         });
         rows.forEach(function (tr) { body.appendChild(tr); });
+        // Totals rows stay pinned below the sorted data - never mixed into it.
+        totalRows.forEach(function (tr) { body.appendChild(tr); });
         if (emptyRow) { body.appendChild(emptyRow); }
         renumber(table);
     }

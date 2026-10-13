@@ -1004,23 +1004,31 @@ body {
     .kpi-value { font-size: 1.4rem; }
 }
 
-/* ==================================================== Issue SIM picker ==== */
-/* Selectable rows in the available-SIM picker table (assign.php). */
-#simPicker tbody tr {
+/* ======================================================= Picker tables ==== */
+/* Every click-to-select table (Issue, Transfer, Replace, Return, Mark Lost)
+   carries .picker-table. These rules used to be scoped to #simPicker and
+   #driverPicker, which caused two problems: the two pickers on Transfer and
+   Replace rendered at DIFFERENT row heights from each other (only the right
+   one was matched), and the selected-row highlight silently never appeared
+   outside assign.php - even though every picker marks its chosen row with
+   .row-selected and picker.js toggles it generically. */
+.picker-table tbody tr {
     cursor: pointer;
 }
-#simPicker tbody tr.row-selected > td,
-#simPicker tbody tr.row-selected:hover > td {
+.picker-table tbody tr.row-selected > td,
+.picker-table tbody tr.row-selected:hover > td {
     background-color: #dbeafe; /* blue-200 - stronger than row hover */
 }
-#simPicker tbody tr.row-selected:hover > td {
+.picker-table tbody tr.row-selected:hover > td {
     background-color: #bfdbfe; /* blue-300 */
 }
 
-/* ============================================ Issue pickers (side-by-side) */
-/* Compact rows so driver + SIM tables fit one screen (10 rows each). */
-#driverPicker th, #driverPicker td,
-#simPicker th, #simPicker td {
+/* Compact BODY rows so a 10-row picker fits one screen. Only `td` is targeted:
+   header cells keep the global .table padding, so every table in the app -
+   picker or data - has the same header height. Declared after
+   .table > :not(caption) > * > * so it wins on source order at equal
+   specificity (both 0,1,1). */
+.picker-table td {
     padding: .35rem .5rem;
 }
 

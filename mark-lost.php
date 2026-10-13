@@ -187,7 +187,7 @@ require __DIR__ . '/includes/header.php';
                         <a class="btn btn-sm btn-outline-secondary" href="mark-lost.php<?= e($qs(['sq' => null, 'spage' => null])) ?>">Clear</a>
                     <?php endif; ?>
                 <?php else: ?>
-                    <table class="table table-sm table-hover mb-0" id="simLostPicker"
+                    <table class="table table-sm table-hover mb-0 picker-table" id="simLostPicker"
                            data-picker="sim" data-status="sPickStatus">
                         <thead>
                         <tr>

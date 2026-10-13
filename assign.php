@@ -311,7 +311,7 @@ require __DIR__ . '/includes/header.php';
                             <a class="btn btn-sm btn-outline-secondary" href="assign.php<?= e($qs(['driver_q' => null, 'dpage' => null])) ?>">Clear</a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <table class="table table-sm table-hover mb-0" id="driverPicker" data-picker="driver" data-status="driverPickStatus" data-preview="pvDriver">
+                        <table class="table table-sm table-hover mb-0 picker-table" id="driverPicker" data-picker="driver" data-status="driverPickStatus" data-preview="pvDriver">
                             <thead>
                             <tr>
                                 <th data-no-sort="1">Badge</th>
@@ -375,7 +375,7 @@ require __DIR__ . '/includes/header.php';
                             <a class="btn btn-sm btn-outline-secondary" href="assign.php<?= e($qs(['sim_q' => null, 'spage' => null])) ?>">Clear</a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <table class="table table-sm table-hover mb-0" id="simPicker" data-picker="sim" data-status="simPickStatus" data-preview="pvSim">
+                        <table class="table table-sm table-hover mb-0 picker-table" id="simPicker" data-picker="sim" data-status="simPickStatus" data-preview="pvSim">
                             <thead>
                             <tr>
                                 <th data-no-sort="1">Mobile</th>

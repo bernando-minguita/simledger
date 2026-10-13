@@ -258,7 +258,7 @@ require __DIR__ . '/includes/header.php';
                             <a class="btn btn-sm btn-outline-secondary" href="return-sim.php<?= e($qs(['aq' => null, 'apage' => null])) ?>">Clear</a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <table class="table table-sm table-hover mb-0" id="assignmentPicker"
+                        <table class="table table-sm table-hover mb-0 picker-table" id="assignmentPicker"
                                data-picker="assignment" data-status="aPickStatus"
                                data-sim-sync="hiddenSimId">
                             <thead>

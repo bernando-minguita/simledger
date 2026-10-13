@@ -2,7 +2,7 @@
 /**
  * SIMLedger - company SIM inventory.
  *
- * Search (number / ICCID / reference), terminal/carrier/status filters,
+ * Search (number / ICCID / reference / driver badge), terminal/carrier/status filters,
  * sorting, pagination, CSV export. Status changes here are admin-only
  * overrides - normal flow is through Issue/Return/Transfer transactions.
  */
@@ -55,11 +55,14 @@ $where  = ' WHERE 1=1';
 $params = [];
 
 if ($q !== '') {
+    // Badge number is searchable too. `d` is the current (open) assignment, so
+    // this matches only SIMs currently issued to a driver holding that badge -
+    // it never surfaces SIMs a driver merely used to hold.
     $where .= ' AND (s.mobile_number LIKE ? OR s.normalized_mobile_number LIKE ?'
-        . ' OR s.iccid LIKE ? OR s.sim_reference LIKE ?)';
+        . ' OR s.iccid LIKE ? OR s.sim_reference LIKE ? OR d.badge_number LIKE ?)';
     $like = '%' . $q . '%';
     $qNorm = normalizePhone($q);
-    array_push($params, $like, '%' . ($qNorm ?? $q) . '%', $like, $like);
+    array_push($params, $like, '%' . ($qNorm ?? $q) . '%', $like, $like, $like);
 }
 if ($fTerminals !== []) {
     $where .= ' AND s.terminal_id IN ('
@@ -257,7 +260,7 @@ $baseUrl = 'sims.php?' . filtersUrl();
             <label class="form-label">Search</label>
             <div class="d-flex gap-2">
                 <input type="text" class="form-control" name="q" value="<?= e($q) ?>"
-                       placeholder="Number / ICCID / SIM ID">
+                       placeholder="Number / ICCID / SIM ID / Badge">
                 <button class="btn btn-outline-primary" type="submit">Search</button>
                 <a class="btn btn-link" href="sims.php">Reset</a>
             </div>
@@ -303,7 +306,7 @@ $th = static function (string $key, string $label, string $extra = ''): string {
                     <?= $th('terminal', 'Terminal') ?>
                     <?= $th('status', 'Status') ?>
                     <?= $th('driver', 'Current Driver') ?>
-                    <?= $th('issued', 'Issued') ?>
+                    <?= $th('issued', 'Issued', ' class="text-nowrap"') ?>
                     <?= $th('notes', 'Notes', ' data-col-default="hide"') ?>
                     <th class="text-end" data-no-sort="1">Actions</th>
                 </tr>
@@ -329,7 +332,7 @@ $th = static function (string $key, string $label, string $extra = ''): string {
                                 <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
-                        <td class="small"><?= $r['issued_at'] !== null
+                        <td class="small text-nowrap"><?= $r['issued_at'] !== null
                             ? e(date('d-M-Y', strtotime((string)$r['issued_at']))) : '—' ?></td>
                         <td class="small text-muted"><?= e($r['notes'] ?? '—') ?></td>
                         <td class="text-end text-nowrap">

@@ -309,7 +309,7 @@ require __DIR__ . '/includes/header.php';
                         <a class="btn btn-sm btn-outline-secondary" href="transfer.php<?= e($qs(['aq' => null, 'apage' => null])) ?>">Clear</a>
                     <?php endif; ?>
                 <?php else: ?>
-                    <table class="table table-sm table-hover mb-0" id="assignmentPicker"
+                    <table class="table table-sm table-hover mb-0 picker-table" id="assignmentPicker"
                            data-picker="assignment" data-status="aPickStatus">
                         <thead>
                         <tr>
@@ -381,7 +381,7 @@ require __DIR__ . '/includes/header.php';
                         <a class="btn btn-sm btn-outline-secondary" href="transfer.php<?= e($qs(['dq' => null, 'dpage' => null])) ?>">Clear</a>
                     <?php endif; ?>
                 <?php else: ?>
-                    <table class="table table-sm table-hover mb-0" id="driverPicker"
+                    <table class="table table-sm table-hover mb-0 picker-table" id="driverPicker"
                            data-picker="driver" data-status="dPickStatus">
                         <thead>
                         <tr>

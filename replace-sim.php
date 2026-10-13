@@ -289,7 +289,7 @@ require __DIR__ . '/includes/header.php';
                         <a class="btn btn-sm btn-outline-secondary" href="replace-sim.php<?= e($qs(['aq' => null, 'apage' => null])) ?>">Clear</a>
                     <?php endif; ?>
                 <?php else: ?>
-                    <table class="table table-sm table-hover mb-0" id="assignmentPicker"
+                    <table class="table table-sm table-hover mb-0 picker-table" id="assignmentPicker"
                            data-picker="assignment" data-status="aPickStatus">
                         <thead>
                         <tr>
@@ -361,7 +361,7 @@ require __DIR__ . '/includes/header.php';
                         <a class="btn btn-sm btn-outline-secondary" href="replace-sim.php<?= e($qs(['sq' => null, 'spage' => null])) ?>">Clear</a>
                     <?php endif; ?>
                 <?php else: ?>
-                    <table class="table table-sm table-hover mb-0" id="simPicker"
+                    <table class="table table-sm table-hover mb-0 picker-table" id="simPicker"
                            data-picker="sim" data-status="sPickStatus">
                         <thead>
                         <tr>
