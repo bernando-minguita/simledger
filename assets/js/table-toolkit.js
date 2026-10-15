@@ -150,17 +150,28 @@
         return out;
     }
 
-    // Freezing gives every column an explicit width, which can leave the table
-    // wider than its container - so make sure it can scroll. The TABLE is never
-    // given a fixed width: it must stay 100% wide so it always fills the card,
-    // with the docked action column flush against the right edge.
+    // Freezing the widths currently rendered into inline px, which can leave
+    // the table wider than its container - so make sure it can scroll. The
+    // TABLE is never given a fixed width: it must stay 100% wide so it always
+    // fills its card, with the docked action column flush against the right
+    // edge. overflow-y is explicitly 'clip', never left to the visible->auto
+    // CSS rule: a row that grows taller mid-drag (shrinking a wrapping column
+    // rewraps its text) would otherwise pop a vertical scrollbar into a
+    // zero-slack card-body, steal ~15px of width, re-flow every column and
+    // shove the Select button - the reported slight movement on Transfer's
+    // driver picker. 'clip' restores the pre-freeze behaviour instead: extra
+    // height is simply cut at the card edge, exactly as .card{overflow:hidden}
+    // always did; only horizontal scrolling is a real feature here.
     function ensureScrollable(table) {
         for (var p = table.parentNode; p && p.nodeType === 1; p = p.parentNode) {
             var ov = window.getComputedStyle(p).overflowX;
             if (ov === 'auto' || ov === 'scroll') { return; }
         }
         var parent = table.parentNode;
-        if (parent && parent.nodeType === 1) { parent.style.overflowX = 'auto'; }
+        if (parent && parent.nodeType === 1) {
+            parent.style.overflowX = 'auto';
+            parent.style.overflowY = 'clip';
+        }
     }
 
     // Freeze the widths currently rendered into inline px, so a drag is not
@@ -366,6 +377,25 @@
                         // its card (which would re-stretch every column).
                         d = Math.max(MIN - startW, wrapW - tableW, d);
                         th.style.width = (startW + d) + 'px';
+                        // The table's right edge moves by d, so the docked
+                        // action cells flow with it. Subtract d from their
+                        // compensation transform to keep them visually pinned
+                        // to the card edge - without this they drift during
+                        // the gesture and snap back on release (the reported
+                        // slight Select-button movement on Transfer's driver
+                        // picker, whose saved widths put it in this branch).
+                        // Dragging the action column itself is excluded: its
+                        // left edge does not move, and its width growth IS
+                        // the resize feedback.
+                        if (at >= 0 && at < cells.length - 1) {
+                            dockTds.forEach(function (td, i) {
+                                if (dockBase[i]) {
+                                    td.style.transform = 'translate(' +
+                                        (dockBase[i].x - d) + 'px, ' +
+                                        dockBase[i].y + 'px)';
+                                }
+                            });
+                        }
                     } else {
                         th.style.width = Math.max(MIN, startW + d) + 'px';
                     }
@@ -386,7 +416,15 @@
                     grip.removeEventListener('pointermove', move);
                     grip.removeEventListener('pointerup', stop);
                     grip.removeEventListener('pointercancel', stop);
+                    // Strip the flip-compensation and re-stick the dock in
+                    // the same task: one layout, one paint, no visible swap.
+                    // Neighbour-trade and tracked scrolling drags both end
+                    // with the cells already at their pinned spot, so this is
+                    // seamless; only a drag OF the action column itself ends
+                    // a width-change away (its own resize feedback).
+                    dockTds.forEach(function (td) { td.style.transform = ''; });
                     document.body.classList.remove('tt-resizing');
+                    table.classList.remove('tt-dragging');
                     grip.classList.remove('tt-active');
                     if (moved) { saveWidths(table, headRow, key); }
                 }
@@ -395,7 +433,48 @@
                 grip.addEventListener('pointermove', move);
                 grip.addEventListener('pointerup', stop);
                 grip.addEventListener('pointercancel', stop);
+
+                // Capture the docked action cells BEFORE the flip (the reads
+                // above already settled layout, so both passes cost one
+                // reflow each and run inside this single pointerdown task -
+                // the browser only paints the end state).
+                var dockTds = Array.prototype.slice.call(
+                    table.querySelectorAll('tbody td.text-end'));
+                var dockPre = dockTds.map(function (td) {
+                    return td.getBoundingClientRect();
+                });
+
                 document.body.classList.add('tt-resizing');
+                // Scoped to THIS table: the CSS that unsticks the docked
+                // action column matches .tt-dragging, so the other table on
+                // the page keeps its sticky dock while this one is dragged
+                // (a body-scoped rule used to jump both action columns).
+                table.classList.add('tt-dragging');
+
+                // A docked cell whose sticky position had been pinned AWAY
+                // from its flow position (table wider than its card, or the
+                // card scrolled sideways - stale saved widths do this) would
+                // jump to that flow position on the flip: the reported Select-
+                // button nudge when merely clicking or touching the grip.
+                // Re-pin the painted position with a transform instead. It is
+                // stripped together with the class in stop(), so a bare click
+                // shows zero movement, and a real drag either keeps the cell
+                // still (neighbour-trade tables) or - in the scrolling branch -
+                // flush() refreshes it per frame so the cell stays pinned for
+                // the whole gesture and re-docks seamlessly on release.
+                var dockBase = [];
+                dockTds.forEach(function (td, i) {
+                    var r = td.getBoundingClientRect();
+                    var dx = dockPre[i].left - r.left;
+                    var dy = dockPre[i].top - r.top;
+                    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                        td.style.transform =
+                            'translate(' + dx + 'px, ' + dy + 'px)';
+                        dockBase[i] = { x: dx, y: dy };
+                    } else {
+                        dockBase[i] = null;
+                    }
+                });
                 grip.classList.add('tt-active');
             });
         });
@@ -580,7 +659,15 @@
             credentials: 'same-origin',
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
-            .then(function (res) { return res.text(); })
+            .then(function (res) {
+                // fetch() resolves on 4xx/5xx too - without this guard an
+                // error page's HTML would be swapped into the region as if
+                // it were the fragment. Throwing hands it to .catch, which
+                // already falls back correctly (soft = keep view, else
+                // navigate to the URL for a clean full-page render).
+                if (!res.ok) { throw new Error('HTTP ' + res.status); }
+                return res.text();
+            })
             .then(function (html) {
                 var doc = new DOMParser().parseFromString(html, 'text/html');
                 region.classList.remove('tt-loading');
@@ -648,32 +735,77 @@
         return out;
     }
 
+    // Column IDENTITY for visibility persistence. The legacy store kept raw
+    // column indices, so a deploy that inserted, removed or reordered a
+    // column silently shifted every saved preference onto the wrong column
+    // (the width store already keys on data-sort for the same reason).
+    // IDs: '#num' | 'k:<data-sort>' (semantic) | 't:<slugified header>' for
+    // unkeyed columns (the picker tables).
+    function colIdent(th, i) {
+        if (th.classList.contains('tt-num')) { return '#num'; }
+        var s = th.getAttribute('data-sort');
+        return s ? 'k:' + s : 't:' + slugify(th.textContent);
+    }
+
+    // Stored visibility (array of IDs, or a legacy array of index numbers)
+    // -> the CURRENT indices of the cells it names. Unknown IDs and
+    // out-of-range legacy indices simply drop, so a stale preference can
+    // never hide a random column.
+    function storedToHidden(headRow, stored) {
+        var out = [];
+        var legacy = stored.some(function (v) { return typeof v === 'number'; });
+        Array.prototype.forEach.call(headRow.cells, function (th, i) {
+            var hit = legacy
+                ? stored.indexOf(i) !== -1
+                : stored.indexOf(colIdent(th, i)) !== -1;
+            if (hit) { out.push(i); }
+        });
+        return out;
+    }
+
+    // Current hidden indices -> the array of IDs persisted to localStorage.
+    function hiddenToStored(headRow, hidden) {
+        var out = [];
+        Array.prototype.forEach.call(headRow.cells, function (th, i) {
+            if (hidden.indexOf(i) !== -1) { out.push(colIdent(th, i)); }
+        });
+        return out;
+    }
+
     // ------------------------------------------------------------------- init
     function initTable(table, index) {
         if (table.getAttribute('data-tt-init')) { return; }
         table.setAttribute('data-tt-init', '1');
 
         var key = table.getAttribute('data-tt-key') || (location.pathname + '#' + index);
+
+        // The "#" column must exist BEFORE a stored preference is resolved:
+        // legacy index arrays counted it as cell 0, and the ID conversion
+        // below maps against the final header.
+        addNumberColumn(table);
+
+        var headRow = table.tHead && table.tHead.rows[0];
         var hidden = [];
         var rawHidden = storeGet(COLS_KEY + key);
         if (rawHidden) {
-            try { hidden = JSON.parse(rawHidden) || []; } catch (e) { hidden = []; }
-        }
-
-        addNumberColumn(table);
-        if (!rawHidden) {
+            try {
+                var parsedHidden = JSON.parse(rawHidden);
+                if (Array.isArray(parsedHidden) && headRow) {
+                    hidden = storedToHidden(headRow, parsedHidden);
+                }
+            } catch (e) { hidden = []; }
+        } else {
             hidden = defaultHiddenColumns(table);
         }
         applyHidden(table, hidden);
 
-        var headRow = table.tHead && table.tHead.rows[0];
         if (!headRow) { return; }
 
         buildColumnMenu(table, hidden, key, function (col, on) {
             var pos = hidden.indexOf(col);
             if (on && pos !== -1) { hidden.splice(pos, 1); }
             if (!on && pos === -1) { hidden.push(col); }
-            storeSet(COLS_KEY + key, JSON.stringify(hidden));
+            storeSet(COLS_KEY + key, JSON.stringify(hiddenToStored(headRow, hidden)));
             applyHidden(table, hidden);
         });
 
@@ -801,30 +933,41 @@
     // data-tt-init - so the partial-refresh path below can keep calling it.
     (function boot() {
         // ---- filter submits refresh only the form's target region --------
-        Array.prototype.forEach.call(filterForms(), function (form) {
-            form.addEventListener('submit', function (e) {
-                e.preventDefault();
-                var targetId = form.getAttribute('data-tt-target') || 'table-partial';
-                var pageParam = form.getAttribute('data-tt-page') || 'page';
-                // Start from the current URL so the OTHER regions' params
-                // (and sort/dir) survive, then overlay this form's fields.
-                var params = new URLSearchParams(location.search);
-                // Multi-value fields (checkbox groups post name[]=a&name[]=b):
-                // drop every existing occurrence first, then APPEND all
-                // values - params.set() would keep only the last checked box.
-                var names = [];
-                new FormData(form).forEach(function (value, name) {
-                    if (names.indexOf(name) === -1) { names.push(name); }
-                });
-                names.forEach(function (name) { params.delete(name); });
-                new FormData(form).forEach(function (value, name) {
-                    params.append(name, value);
-                });
-                params.delete(pageParam);
-                var url = location.pathname + (params.toString() ? '?' + params.toString() : '');
-                history.pushState({ tt: 1 }, '', url);
-                loadPartial(url, document.getElementById(targetId));
+        // Delegated from document instead of bound per form at boot: a form
+        // that lives INSIDE its own swapped region (the Transfer / Replace /
+        // Mark Lost picker cards, where the whole card is data-tt-partial)
+        // is replaced wholesale on every partial refresh, so the boot-time
+        // listener died after the first search - the next search fell back
+        // to a full page load, the one after that went partial again,
+        // alternating forever. submit bubbles, so one document-level
+        // listener survives every swap (pagination clicks below are already
+        // delegated the same way).
+        document.addEventListener('submit', function (e) {
+            var form = e.target && e.target.closest
+                ? e.target.closest('form.filter-bar, form[data-tt-target]')
+                : null;
+            if (!form) { return; }
+            e.preventDefault();
+            var targetId = form.getAttribute('data-tt-target') || 'table-partial';
+            var pageParam = form.getAttribute('data-tt-page') || 'page';
+            // Start from the current URL so the OTHER regions' params
+            // (and sort/dir) survive, then overlay this form's fields.
+            var params = new URLSearchParams(location.search);
+            // Multi-value fields (checkbox groups post name[]=a&name[]=b):
+            // drop every existing occurrence first, then APPEND all
+            // values - params.set() would keep only the last checked box.
+            var names = [];
+            new FormData(form).forEach(function (value, name) {
+                if (names.indexOf(name) === -1) { names.push(name); }
             });
+            names.forEach(function (name) { params.delete(name); });
+            new FormData(form).forEach(function (value, name) {
+                params.append(name, value);
+            });
+            params.delete(pageParam);
+            var url = location.pathname + (params.toString() ? '?' + params.toString() : '');
+            history.pushState({ tt: 1 }, '', url);
+            loadPartial(url, document.getElementById(targetId));
         });
 
         // ---- pagination links (and explicit data-tt-ajax links) inside
@@ -851,7 +994,13 @@
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
-                .then(function (res) { return res.text(); })
+                .then(function (res) {
+                    // Same guard as loadPartial(): never swap an error page
+                    // into the regions - throw to the .catch below, which
+                    // keeps the current view instead.
+                    if (!res.ok) { throw new Error('HTTP ' + res.status); }
+                    return res.text();
+                })
                 .then(function (html) {
                     var doc = new DOMParser().parseFromString(html, 'text/html');
                     if (!swapRegions(doc, regions)) { return; }

@@ -558,14 +558,36 @@ body.tt-resizing {
 
 /* While a column is being dragged every pointermove writes widths, and each
    write forces Chrome to re-resolve the sticky constraint on EVERY docked
-   cell (~50 of them on a 25-row table), repainting each row - the judder
+   body cell (~50 of them on a 25-row table), repainting each row - the judder
    reported on Drivers, Drivers Without SIM, Contact Coverage, SIM Records
    and Audit Log, which all have a docked action column. Unsticking the dock
    mid-drag removes that per-frame cost entirely; the class drops on
-   pointerup so the dock re-pins. Side effect while scrolled right: the
-   buttons scroll with the table during the drag and re-dock after. */
-body.tt-resizing .table thead th.text-end,
-body.tt-resizing .table tbody td.text-end {
+   pointerup so the dock re-pins.
+
+   The selector is scoped to .tt-dragging - the class the grip puts on ITS
+   OWN table for the duration of the drag - never to <body>: a body-scoped
+   rule flipped every table on the page from sticky to static on the same
+   pointerdown, so dragging a grip in the Driver picker also made the Company
+   SIM picker's docked action column jump (and vice versa) on Issue Company
+   SIM, which shows two pickers per page.
+
+   The header cell is deliberately NOT unsticked: one sticky cell per frame
+   costs nothing measurable (the judder came from the body cells), and
+   keeping the th positioned keeps the grip's containing block - an
+   absolutely-positioned .tt-resize inside a th that turns static re-anchors
+   to the initial containing block, so the handle detaches from the column
+   mid-drag.
+
+   The JS measures every docked cell before and after this flip and pins the
+   painted position back with a transform (stripped together with the class
+   on pointerup), so a dock pinned away from its flow position - stale saved
+   widths making the table wider than its card - does not jump when the class
+   lands; a bare click on the grip moves nothing. In the scrolling branch the
+   transform is refreshed per frame, so the buttons stay pinned to the card
+   edge for the whole gesture and re-dock seamlessly on release. Residual
+   motion is limited to resizing the action column itself (its width
+   feedback) and to rows changing height when a wrapping column rewraps. */
+.table.tt-dragging tbody td.text-end {
     position: static;
 }
 
