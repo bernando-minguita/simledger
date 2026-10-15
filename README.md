@@ -168,7 +168,26 @@ repository.
   `<table class="table">` automatically:
   - **Row numbers** – a leading `#` column, offset-aware for paginated lists.
   - **Columns menu** – show/hide any column; the choice is stored per page in
-    `localStorage` and survives sessions.
+    `localStorage` and survives sessions. The menu also carries the column-width
+    actions (auto-fit / reset).
+  - **Column widths** – drag a header's right edge to resize that column. The
+    first drag *freezes* the rendered widths into px so the drag is not absorbed
+    by the browser stretching the columns, and the width is taken from (or given
+    to) the next visible column so the table keeps filling its card. Widths are
+    stored per page in `localStorage` and re-applied before the first paint. A
+    column is remembered by its `data-sort` key (or its position when it has
+    none), so widths survive the column being hidden and re-shown. The Columns
+    menu also offers **Auto-fit column widths** — which sizes every column to
+    its content, spreadsheet-style, by briefly letting the browser lay the table
+    out at its max-content width and reading what it chose — and **Reset column
+    widths**. The `#` row-number column is fixed at its 76px design width (no
+    grip, skipped by freeze / auto-fit / save / restore) and can never be a
+    drag partner; other columns are capped at 480px by auto-fit. Drags are
+    coalesced to one width-write per animation frame, freeze keeps fractional
+    precision, and transitions are suspended mid-drag. Tables wider than their
+    card scroll, so a drag resizes just that column; tables that fill their
+    card trade width with the neighbour to keep the total - either way the
+    untouched columns never jump.
   - **Sorting** – click any header to sort. Paginated lists (SIM Inventory,
     Drivers, Audit Log) sort **server-side** via `?sort=<key>&dir=` (shareable,
     bookmarkable, restored from the URL or the last-used preference); all
@@ -180,6 +199,20 @@ repository.
     admin Drivers & SIM Records lists and SIM History search all use it —
     searching one picker leaves the other's state untouched in the URL.
     Browser back/forward re-applies previous states.
+- Column geometry is **fixed** (`table-layout: fixed`) and the widths are keyed
+  on the `data-sort` attribute, so they are declared once in `style.css` rather
+  than per table. A column's width therefore never depends on its content, so
+  replacing the body (sort, filter, AJAX region refresh) cannot shift the
+  layout. Unkeyed columns share the leftover space equally; add class
+  `table-auto` to opt a single table back to auto layout. The trailing action
+  column (`th`/`td.text-end` — verified to be the last cell of its row in every
+  table that has one) is **docked to the right edge** with `position: sticky`,
+  so the row buttons stay reachable while a wide table scrolls sideways. The
+  dock draws no border or separator, so it adds no vertical line to the table.
+- The table is never given a fixed pixel width: it stays `100%` wide so it
+  always fills its card and the docked column sits flush against the right
+  edge. A column drag therefore takes its width from (or gives it to) the next
+  visible column, so the table's total width never changes.
 - Server-side sortable tables declare `data-sort` on their `<th>` elements,
   `data-tt-sort="server"` on the `<table>`, an optional `data-offset` for row
   numbering, and keep their column allow-lists in the page's `$sortMap`.

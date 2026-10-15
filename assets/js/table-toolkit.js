@@ -10,6 +10,11 @@
  *     other tables; the preference persists across sessions
  *   - rows marked data-tt-total are TOTALS rows: never sorted, never row
  *     numbered, and always pinned to the bottom of the body
+ *   - drag a header's right edge to resize that column: widths are frozen into
+ *     px and taken from (or given to) the neighbouring column so the table keeps
+ *     filling its card; the result is persisted per page in localStorage. The
+ *     Columns menu also offers auto-fit (size every column to its content) and
+ *     reset
  *   - filter submits and pagination links refresh only their table REGION
  *     (fetch + history API): any container marked data-tt-partial, plus the
  *     legacy #table-partial id; forms declare data-tt-target / data-tt-page
@@ -19,6 +24,7 @@
 
     var COLS_KEY = 'simledger:tt:cols:';
     var SORT_KEY = 'simledger:tt:sort:';
+    var WIDTHS_KEY = 'simledger:tt:widths:';
 
     function slugify(text) {
         return String(text || '').toLowerCase()
@@ -107,7 +113,295 @@
         });
     }
 
-    function buildColumnMenu(table, hidden, onChange) {
+    // ----------------------------------------------------------------- widths
+    // Drag-to-resize column edges, persisted per page in localStorage.
+    //
+    // The tables are table-layout: fixed, so a width set on the first-row cell
+    // IS the column width and the body follows automatically. While the columns
+    // add up to less than the container the browser stretches them to fill it,
+    // so a drag would not track the pointer - the first drag therefore "freezes"
+    // the rendered widths into inline px.
+    //
+    // The table itself is deliberately NEVER given a fixed width: it stays 100%
+    // wide so it always fills the card and the docked action column sits flush
+    // against the right edge. Instead a drag takes its width from (or gives it
+    // to) the next visible column, so the total - and therefore the table width
+    // - never changes.
+    //
+    // A column is identified by data-sort when it has one, so widths survive
+    // the column being hidden and re-shown (and are unrelated to its position).
+    function colId(th, index) {
+        if (th.classList.contains('tt-num')) { return '#num'; }
+        var s = th.getAttribute('data-sort');
+        return s ? 'k:' + s : 'c:' + index;
+    }
+
+    // The "#" row-number column is FIXED at its stylesheet width (76px - see
+    // th.tt-num): it gets no resize grip, is skipped by freeze / auto-fit /
+    // save / restore, and can never be a drag partner. Everything else only
+    // ever steals width from (or yields it to) its neighbour, so the table
+    // keeps filling its card.
+
+    function visibleCells(headRow) {
+        var out = [];
+        Array.prototype.forEach.call(headRow.cells, function (th, i) {
+            if (!th.classList.contains('tt-hidden-c')) { out.push([th, i]); }
+        });
+        return out;
+    }
+
+    // Freezing gives every column an explicit width, which can leave the table
+    // wider than its container - so make sure it can scroll. The TABLE is never
+    // given a fixed width: it must stay 100% wide so it always fills the card,
+    // with the docked action column flush against the right edge.
+    function ensureScrollable(table) {
+        for (var p = table.parentNode; p && p.nodeType === 1; p = p.parentNode) {
+            var ov = window.getComputedStyle(p).overflowX;
+            if (ov === 'auto' || ov === 'scroll') { return; }
+        }
+        var parent = table.parentNode;
+        if (parent && parent.nodeType === 1) { parent.style.overflowX = 'auto'; }
+    }
+
+    // Freeze the widths currently rendered into inline px, so a drag is not
+    // absorbed by the browser stretching the columns to fill the container.
+    // Fractional precision is kept (no Math.round): with table-layout: fixed
+    // the browser stretches N columns to fill the container, so each rendered
+    // width is usually fractional (e.g. 123.37px). Rounding every column to an
+    // integer loses up to N/2 px of total width in one step, and the columns
+    // visibly jump - the reported "other columns move to the right" on wide
+    // tables like the SIM Inventory Report.
+    function freezeWidths(table, headRow) {
+        if (table.hasAttribute('data-tt-frozen')) { return; }
+        visibleCells(headRow).forEach(function (pair) {
+            // The "#" column is fixed at its stylesheet 76px - it must never
+            // get an inline width, so a freeze cannot pin a stretched copy.
+            if (pair[0].classList.contains('tt-num')) { return; }
+            var w = pair[0].getBoundingClientRect().width;
+            if (w > 0) { pair[0].style.width = w + 'px'; }
+        });
+        table.setAttribute('data-tt-frozen', '1');
+        ensureScrollable(table);
+    }
+
+    function applyWidths(table, headRow, widths) {
+        if (!widths) { return; }
+        var any = false;
+        visibleCells(headRow).forEach(function (pair) {
+            var id = colId(pair[0], pair[1]);
+            // The "#" column is fixed at its stylesheet 76px: ignore any width
+            // stored before the grip was removed, so it always snaps back.
+            if (id === '#num') {
+                pair[0].style.width = '';
+                return;
+            }
+            var w = widths[id];
+            if (w) {
+                pair[0].style.width = w + 'px';
+                any = true;
+            }
+        });
+        if (any) {
+            table.setAttribute('data-tt-frozen', '1');
+            ensureScrollable(table);
+        }
+    }
+
+    function saveWidths(table, headRow, key) {
+        var out = {};
+        visibleCells(headRow).forEach(function (pair) {
+            // The "#" column is fixed - never persist a width for it, so a
+            // value narrowed before the grip was removed cannot come back.
+            if (pair[0].classList.contains('tt-num')) { return; }
+            var w = parseFloat(pair[0].style.width);
+            // One decimal keeps the file small without re-introducing the
+            // freeze rounding jump (integers can lose ~N/2 px of total width).
+            if (w > 0) { out[colId(pair[0], pair[1])] = Math.round(w * 10) / 10; }
+        });
+        storeSet(WIDTHS_KEY + key, JSON.stringify(out));
+    }
+
+    function resetWidths(table, headRow, key) {
+        Array.prototype.forEach.call(headRow.cells, function (th) {
+            th.style.width = '';
+        });
+        table.style.width = '';
+        table.removeAttribute('data-tt-frozen');
+        try { localStorage.removeItem(WIDTHS_KEY + key); } catch (e) { /* private mode */ }
+    }
+
+    // "Auto-fit": size every visible column to its content, the way a
+    // spreadsheet does. The browser does the measuring - the table is briefly
+    // switched to auto layout with nowrap cells, the natural widths are read,
+    // then frozen and stored. Reading getBoundingClientRect() forces the layout
+    // synchronously but never paints, so the temporary state is invisible.
+    function autoFitWidths(table, headRow, key) {
+        var MIN = 80;
+        var MAX = 480;
+
+        var cells = visibleCells(headRow);
+        if (cells.length === 0) { return; }
+
+        // Clear the current widths so the browser is free to size to content.
+        cells.forEach(function (pair) { pair[0].style.width = ''; });
+
+        table.classList.add('tt-autofit');
+        var natural = [];
+        cells.forEach(function (pair) {
+            natural.push(Math.round(pair[0].getBoundingClientRect().width));
+        });
+        table.classList.remove('tt-autofit');
+
+        var out = {};
+        cells.forEach(function (pair, i) {
+            var id  = colId(pair[0], pair[1]);
+            // The "#" column is fixed: leave it on its stylesheet width and
+            // never store a width for it.
+            if (id === '#num') {
+                pair[0].style.width = '';
+                return;
+            }
+            var w   = Math.max(MIN, Math.min(MAX, natural[i]));
+            pair[0].style.width = w + 'px';
+            out[id] = w;
+        });
+
+        table.setAttribute('data-tt-frozen', '1');
+        ensureScrollable(table);
+        storeSet(WIDTHS_KEY + key, JSON.stringify(out));
+    }
+
+    function initResize(table, headRow, key) {
+        var MIN = 40;
+
+        Array.prototype.forEach.call(headRow.cells, function (th) {
+            if (th.querySelector('.tt-resize')) { return; }
+            // The "#" row-number column is fixed at its 76px design width - it
+            // can never widen, so a grip on it would only ever disturb the
+            // neighbour column. No grip, no drag.
+            if (th.classList.contains('tt-num')) { return; }
+
+            var grip = document.createElement('span');
+            grip.className = 'tt-resize';
+            grip.setAttribute('title', 'Drag to resize');
+            th.appendChild(grip);
+
+            // A click that lands on the grip must never reach the header's
+            // sort handler.
+            grip.addEventListener('click', function (e) { e.stopPropagation(); });
+
+            grip.addEventListener('pointerdown', function (e) {
+                if (e.pointerType === 'mouse' && e.button !== 0) { return; }
+                e.preventDefault();
+                e.stopPropagation();
+
+                freezeWidths(table, headRow);
+
+                // The neighbour that gives up (or takes) the difference, so the
+                // table's total width - and therefore its fill of the card -
+                // never changes. Falls back to the previous column, which is the
+                // boundary a last-column drag actually moves. The fixed "#"
+                // column never takes part: it can neither give nor receive.
+                // Re-read the rendered widths AFTER the freeze: freeze() rewrites
+                // style.width on every column, so measuring before it would hand
+                // the drag stale startW/mateW values and the two columns would
+                // visibly snap on the first pointermove - the reported "other
+                // columns move to the right" on wide tables like the SIM
+                // Inventory Report. getBoundingClientRect() forces a sync
+                // reflow, so these reads observe the freshly frozen layout.
+                var cells = visibleCells(headRow);
+                var at = -1;
+                for (var i = 0; i < cells.length; i++) {
+                    if (cells[i][0] === th) { at = i; }
+                }
+                var mate = null;
+                if (at !== -1 && cells.length > 1) {
+                    for (var j = at + 1; j < cells.length; j++) {
+                        if (!cells[j][0].classList.contains('tt-num')) { mate = cells[j][0]; break; }
+                    }
+                    if (!mate) {
+                        for (var k = at - 1; k >= 0; k--) {
+                            if (!cells[k][0].classList.contains('tt-num')) { mate = cells[k][0]; break; }
+                        }
+                    }
+                }
+
+                // Tables wider than their wrapper scroll instead of stretching:
+                // resizing one column then needs no partner - stealing from the
+                // neighbour would only make it visibly jump (reported on Current
+                // Assignments and the SIM Inventory Report, both of which
+                // overflow). Only tables that fill their card keep the neighbour
+                // trade, which preserves the total and avoids a global
+                // re-stretch of every column.
+                var wrapW  = table.parentNode ? table.parentNode.clientWidth : 0;
+                var tableW = table.getBoundingClientRect().width;
+                var single = tableW > wrapW + 1;
+                if (single) { mate = null; }
+
+                var startX = e.clientX;
+                var startW = th.getBoundingClientRect().width;
+                var mateW  = mate ? mate.getBoundingClientRect().width : 0;
+                var moved  = false;
+                // Pointermove can fire several times per frame; two columns whose
+                // inline widths disagree with the layout for even one frame read
+                // as judder on wide tables (25 body rows re-lay out per write).
+                // Coalesce to one paired write per animation frame so the two
+                // widths always change atomically.
+                var rafId  = 0;
+                var lastD  = 0;
+
+                function flush() {
+                    rafId = 0;
+                    var d = lastD;
+                    if (mate) {
+                        // Card-filling table: clamp so neither column drops
+                        // below MIN; the total never changes.
+                        d = Math.max(MIN - startW, Math.min(mateW - MIN, d));
+                        th.style.width   = (startW + d) + 'px';
+                        mate.style.width = (mateW - d) + 'px';
+                    } else if (single) {
+                        // Scrolling table: only this column moves. It can grow
+                        // freely (the wrapper scrolls) but may not shrink past
+                        // MIN or past the point where the table stops filling
+                        // its card (which would re-stretch every column).
+                        d = Math.max(MIN - startW, wrapW - tableW, d);
+                        th.style.width = (startW + d) + 'px';
+                    } else {
+                        th.style.width = Math.max(MIN, startW + d) + 'px';
+                    }
+                }
+
+                function move(ev) {
+                    var d = ev.clientX - startX;
+                    if (Math.abs(d) > 2) { moved = true; }
+                    lastD = d;
+                    if (!rafId) { rafId = requestAnimationFrame(flush); }
+                }
+
+                function stop() {
+                    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+                    // A drag that ends mid-frame still has a queued delta -
+                    // apply it so the saved widths match what was on screen.
+                    if (moved) { flush(); }
+                    grip.removeEventListener('pointermove', move);
+                    grip.removeEventListener('pointerup', stop);
+                    grip.removeEventListener('pointercancel', stop);
+                    document.body.classList.remove('tt-resizing');
+                    grip.classList.remove('tt-active');
+                    if (moved) { saveWidths(table, headRow, key); }
+                }
+
+                grip.setPointerCapture(e.pointerId);
+                grip.addEventListener('pointermove', move);
+                grip.addEventListener('pointerup', stop);
+                grip.addEventListener('pointercancel', stop);
+                document.body.classList.add('tt-resizing');
+                grip.classList.add('tt-active');
+            });
+        });
+    }
+
+    function buildColumnMenu(table, hidden, key, onChange) {
         var headRow = table.tHead && table.tHead.rows[0];
         if (!headRow) { return; }
         var host = document.createElement('div');
@@ -133,6 +427,43 @@
             ul.appendChild(li);
             lab.addEventListener('click', function (e) { e.stopPropagation(); });
             cb.addEventListener('change', function () { onChange(i, cb.checked); });
+        });
+
+        // Column-width actions: fit every column to its content, or clear the
+        // dragged widths back to the stylesheet defaults.
+        function closeMenu() {
+            var toggle = host.querySelector('[data-bs-toggle="dropdown"]');
+            if (toggle && window.bootstrap && window.bootstrap.Dropdown) {
+                var inst = window.bootstrap.Dropdown.getInstance(toggle);
+                if (inst) { inst.hide(); }
+            }
+        }
+
+        function widthAction(label, fn) {
+            var li = document.createElement('li');
+            var b  = document.createElement('button');
+            b.type = 'button';
+            b.className = 'dropdown-item';
+            b.textContent = label;
+            li.appendChild(b);
+            ul.appendChild(li);
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                fn();
+                closeMenu();
+            });
+        }
+
+        var sep = document.createElement('li');
+        sep.innerHTML = '<hr class="dropdown-divider">';
+        ul.appendChild(sep);
+
+        widthAction('Auto-fit column widths', function () {
+            autoFitWidths(table, headRow, key);
+        });
+        widthAction('Reset column widths', function () {
+            resetWidths(table, headRow, key);
         });
 
         var card = table.closest('.card');
@@ -334,7 +665,11 @@
             hidden = defaultHiddenColumns(table);
         }
         applyHidden(table, hidden);
-        buildColumnMenu(table, hidden, function (col, on) {
+
+        var headRow = table.tHead && table.tHead.rows[0];
+        if (!headRow) { return; }
+
+        buildColumnMenu(table, hidden, key, function (col, on) {
             var pos = hidden.indexOf(col);
             if (on && pos !== -1) { hidden.splice(pos, 1); }
             if (!on && pos === -1) { hidden.push(col); }
@@ -342,8 +677,13 @@
             applyHidden(table, hidden);
         });
 
-        var headRow = table.tHead && table.tHead.rows[0];
-        if (!headRow) { return; }
+        // Restore dragged column widths (applied before the first paint, since
+        // the toolkit boots during parsing).
+        var rawWidths = storeGet(WIDTHS_KEY + key);
+        if (rawWidths) {
+            try { applyWidths(table, headRow, JSON.parse(rawWidths)); } catch (e) { /* ignore */ }
+        }
+        initResize(table, headRow, key);
 
         var server = table.getAttribute('data-tt-sort') === 'server';
         var stored = null;

@@ -698,7 +698,7 @@ $invalidCount = $classified !== null ? count($classified) - $validCount : 0;
             <div class="card-header">Row detail (first 200)</div>
             <div class="card-body p-0">
                 <div class="table-responsive" style="max-height:420px;overflow:auto">
-                    <table class="table table-sm table-striped mb-0">
+                    <table class="table table-sm table-striped mb-0 table-auto">
                         <thead>
                         <tr><th>#</th><th>State</th><th>Data</th><th>Issues</th></tr>
                         </thead>

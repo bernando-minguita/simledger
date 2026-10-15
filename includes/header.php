@@ -192,6 +192,18 @@ $initials  = strtoupper(substr($nameParts[0] ?? 'U', 0, 1)
     <link rel="shortcut icon" href="<?= e($base) ?>assets/img/favicon.ico">
     <link rel="stylesheet" href="<?= e($base . asset('assets/css/bootstrap.min.css')) ?>">
     <link rel="stylesheet" href="<?= e($base . asset('assets/css/style.css')) ?>">
+    <!-- Warm the app scripts. All three run during parsing and adjust the DOM
+         BEFORE the first paint - the "#" row-number column, the hidden columns,
+         the sidebar scroll offset, the picker's pre-selected row. Preloading
+         means they are already fetched when the parser reaches them, so that
+         work always lands ahead of the paint rather than after it: the same
+         "the structure is already there, only the data changed" behaviour a
+         server-rendered table gets for free. The URL must match the <script>
+         tag in footer.php exactly (both use asset()) or the browser fetches
+         the file twice. -->
+    <link rel="preload" as="script" href="<?= e($base . asset('assets/js/table-toolkit.js')) ?>">
+    <link rel="preload" as="script" href="<?= e($base . asset('assets/js/picker.js')) ?>">
+    <link rel="preload" as="script" href="<?= e($base . asset('assets/js/shared.js')) ?>">
 </head>
 <body>
 

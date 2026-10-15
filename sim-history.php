@@ -223,7 +223,7 @@ require __DIR__ . '/includes/header.php';
         <div class="card-header">Assignment History (immutable)</div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-striped mb-0 dt-nowrap">
+                <table class="table table-striped mb-0 dt-nowrap sim-history-rows">
                     <thead>
                     <tr>
                         <th>Driver</th>

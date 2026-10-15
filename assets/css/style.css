@@ -318,6 +318,113 @@ body.sidebar-open .sidebar-backdrop {
     vertical-align: middle;
 }
 
+/* ------------------------------------------------- fixed column geometry ---
+ * table-layout: fixed makes column widths a function of the HEADER ONLY - the
+ * browser never measures body cells. Two consequences, both wanted:
+ *   1. replacing the body (sort, filter, AJAX region refresh, a streamed
+ *      result set) can no longer change a column's width, so nothing shifts;
+ *   2. layout is O(columns) instead of O(rows x columns).
+ * The cost: a column can no longer widen to fit its content, so every column
+ * needs a width and an over-long value is ellipsised rather than spilling over
+ * the neighbouring column.
+ *
+ * Widths are keyed on the data-sort attribute the tables already carry, i.e.
+ * on the column's MEANING rather than its position, so these numbers can be
+ * tuned in one place without touching any table markup. Columns with no key
+ * (the small admin lists, the picker tables) split the leftover space equally.
+ * Put class "table-auto" on a single table to opt it back out.
+ */
+.table {
+    table-layout: fixed;
+}
+
+.table.table-auto {
+    table-layout: auto;
+}
+
+/* --- utility columns (identical on every table) ------------------------- */
+/* The "#" row-number column keeps its fixed 76px (see th.tt-num below); the
+   toolkit hard-caps it at the same 76px in drag / auto-fit / freeze / restore,
+   so it can be narrowed but never widened. Trailing action column: wide
+   enough for the widest case (two btn-sm buttons + the .85rem cell padding). */
+.table thead th.text-end {
+    width: 170px;
+}
+
+/* --- widths by semantic column key ------------------------------------- */
+/* These are PIXELS, not percentages, on purpose. A fixed column can never
+   widen, so a percentage that is fine on a 1600px monitor clips a date on a
+   1366px laptop. Content-sized px avoids that entirely: if the columns add up
+   to less than the container the browser scales them up (no clipping), and if
+   they add up to more the table scrolls inside its existing .table-responsive
+   wrapper (no clipping). Values include the .85rem cell padding, because
+   Bootstrap sets box-sizing: border-box. */
+/* narrow: codes, flags, counts */
+.table thead th[data-sort="badge"]       { width: 80px;  }
+.table thead th[data-sort="reachable"]   { width: 85px;  }
+.table thead th[data-sort="history"]     { width: 85px;  }
+.table thead th[data-sort="contacts"]    { width: 90px;  }
+.table thead th[data-sort="carrier"]     { width: 95px;  }
+.table thead th[data-sort="action"]      { width: 95px;  }
+.table thead th[data-sort="agency"]      { width: 100px; }
+.table thead th[data-sort="sim_ref"]     { width: 100px; }
+.table thead th[data-sort="terminal"]    { width: 105px; }
+.table thead th[data-sort="user"]        { width: 105px; }
+.table thead th[data-sort="status"]      { width: 115px; }
+.table thead th[data-sort="iqama"]       { width: 115px; }
+.table thead th[data-sort="nationality"] { width: 120px; }
+.table thead th[data-sort="entity"]      { width: 120px; }
+.table thead th[data-sort="reason"]      { width: 130px; }
+.table thead th[data-sort="ip"]          { width: 140px; }
+.table thead th[data-sort="contact"]     { width: 140px; }
+/* Phone numbers are always 13 glyphs ("+9665…") in tabular figures, so 150px
+   fits the content with breathing room: the column never starts out clipped,
+   and the first drag does not visibly snap the text from ellipsis to full. */
+.table thead th[data-sort="number"]      { width: 150px; }
+.table thead th[data-sort="sim"]         { width: 150px; }
+.table thead th[data-sort="issuedby"]    { width: 155px; }
+.table thead th[data-sort="returnedby"]  { width: 155px; }
+.table thead th[data-sort="performed"]   { width: 155px; }
+.table thead th[data-sort="prev"]        { width: 155px; }
+.table thead th[data-sort="new"]         { width: 155px; }
+/* wide: names, identifiers, free text */
+.table thead th[data-sort="driver"]      { width: 165px; }
+.table thead th[data-sort="name"]        { width: 165px; }
+.table thead th[data-sort="date"]        { width: 170px; }
+.table thead th[data-sort="created"]     { width: 170px; }
+.table thead th[data-sort="issued"]      { width: 170px; }
+.table thead th[data-sort="returned"]    { width: 170px; }
+.table thead th[data-sort="iccid"]       { width: 175px; }
+.table thead th[data-sort="changes"]     { width: 210px; }
+.table thead th[data-sort="notes"]       { width: 280px; }
+
+/* --- overflow safety ---------------------------------------------------- */
+/* A fixed column cannot widen, so clip with an ellipsis instead of letting
+   nowrap text run over the next cell. Cell padding (.85rem) is wider than the
+   hover shadow, so buttons inside cells are not visibly clipped. */
+.table > :not(caption) > * > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- tables without data-sort keys ------------------------------------- */
+/* The assignment-history table on sim-history.php is plain markup (no sort
+   keys), so its columns are spelled out positionally. Child 1 is the toolkit's
+   injected "#" column; children 6 and 8 are hidden by default. */
+.sim-history-rows th:nth-child(2)  { width: 165px; }  /* Driver */
+.sim-history-rows th:nth-child(3)  { width: 80px;  }  /* Badge */
+.sim-history-rows th:nth-child(4)  { width: 105px; }  /* Terminal */
+.sim-history-rows th:nth-child(5)  { width: 170px; }  /* Issued */
+.sim-history-rows th:nth-child(6)  { width: 155px; }  /* Issued By (hidden) */
+.sim-history-rows th:nth-child(7)  { width: 170px; }  /* Returned */
+.sim-history-rows th:nth-child(8)  { width: 155px; }  /* Returned By (hidden) */
+.sim-history-rows th:nth-child(9)  { width: 130px; }  /* Reason */
+.sim-history-rows th:nth-child(10) { width: 280px; }  /* Remarks */
+
+/* The change-log table's unkeyed "Previous / New" column holds an
+   "old -> new" pair, so it needs more than an equal share of the leftover. */
+#history-partial th:nth-child(8) { width: 155px; }
+
 /* Row hover: soft accent tint so the eye tracks across wide tables.
    Specificity (0,2,3) beats Bootstrap's striped/background layers
    (.table > :not(caption) > * > *), so it works on every table without
@@ -346,7 +453,7 @@ th.tt-sortable { cursor: pointer; user-select: none; }
 th.tt-sortable:hover { color: var(--app-accent); }
 th.tt-sorted-asc::after  { content: ' \25B2'; font-size: .68em; }
 th.tt-sorted-desc::after { content: ' \25BC'; font-size: .68em; }
-th.tt-num, td.tt-num { width: 46px; text-align: right; white-space: nowrap; color: #64748b; font-variant-numeric: tabular-nums; }
+th.tt-num, td.tt-num { width: 76px; max-width: 76px; text-align: right; white-space: nowrap; color: #64748b; font-variant-numeric: tabular-nums; }
 .tt-hidden-c { display: none !important; }
 .tt-menu { display: inline-block; vertical-align: middle; }
 .tt-menu-float { float: right; }
@@ -355,6 +462,112 @@ th.tt-num, td.tt-num { width: 46px; text-align: right; white-space: nowrap; colo
 .tt-menu .dropdown-item input { margin: 0; }
 .tt-bar { display: flex; justify-content: flex-end; padding: .5rem .75rem .25rem; }
 .tt-loading { opacity: .45; pointer-events: none; transition: opacity .15s ease; }
+
+/* ------------------------------------------------- column resize grip ---- */
+/* Every header gets a grab strip on its right edge. It sits INSIDE the cell
+   because the fixed-geometry rules above clip cell overflow. */
+.table thead th {
+    position: relative;
+}
+
+.tt-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;          /* pointermove must track on touch too */
+    z-index: 2;
+}
+
+.tt-resize::after {
+    content: '';
+    position: absolute;
+    top: 20%;
+    right: 1px;
+    width: 2px;
+    height: 60%;
+    border-radius: 1px;
+    background: transparent;
+    transition: background-color .12s ease;
+}
+
+/* The indicator is per-grip (hover, or the grip being dragged), never driven by
+   a class on <body>: if a drag ever ended without its cleanup running, a
+   body-level rule would leave a line on EVERY column - which reads as the table
+   suddenly having a grid. */
+.tt-resize:hover::after,
+.tt-resize.tt-active::after {
+    background: var(--app-accent);
+}
+
+/* Temporary state used while "Auto-fit column widths" measures the natural
+   width of each column: the table goes back to auto layout at its max-content
+   width with nowrap cells, so every column reports the width its content
+   actually needs. It is never painted - the toolkit reads the layout
+   synchronously and removes the class in the same task - so the flash of
+   auto-layout cannot be seen. width:auto !important is required to beat the
+   [data-sort] width rules above. */
+.table.tt-autofit {
+    table-layout: auto;
+    width: max-content;
+}
+
+.table.tt-autofit > :not(caption) > * > * {
+    width: auto !important;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+/* While a column is being dragged: no text selection, one cursor everywhere,
+   and no transitions - every pointermove writes widths, and the row-hover
+   fade would otherwise repaint all 25 rows per frame (the judder reported
+   on Current Assignments). */
+body.tt-resizing,
+body.tt-resizing * {
+    user-select: none;
+    transition: none !important;
+}
+
+body.tt-resizing {
+    cursor: col-resize;
+}
+
+/* ------------------------------------------------ docked action column --- */
+/* The trailing action column (th/td.text-end - verified across all 32 tables
+   that every such cell is the LAST cell of its row) is pinned to the right
+   edge, so the row buttons stay reachable while a wide table scrolls sideways.
+   Bootstrap paints every cell with an opaque background-color, so the docked
+   cell hides whatever slides under it - no border or separator is drawn, so the
+   dock adds no vertical line to the table. */
+.table thead th.text-end,
+.table tbody td.text-end {
+    position: sticky;
+    right: 0;
+}
+
+.table thead th.text-end {
+    z-index: 3;
+}
+
+.table tbody td.text-end {
+    z-index: 2;
+}
+
+/* While a column is being dragged every pointermove writes widths, and each
+   write forces Chrome to re-resolve the sticky constraint on EVERY docked
+   cell (~50 of them on a 25-row table), repainting each row - the judder
+   reported on Drivers, Drivers Without SIM, Contact Coverage, SIM Records
+   and Audit Log, which all have a docked action column. Unsticking the dock
+   mid-drag removes that per-frame cost entirely; the class drops on
+   pointerup so the dock re-pins. Side effect while scrolled right: the
+   buttons scroll with the table during the drag and re-dock after. */
+body.tt-resizing .table thead th.text-end,
+body.tt-resizing .table tbody td.text-end {
+    position: static;
+}
 
 
 /* ============================================================== badges ==== */
